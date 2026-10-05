@@ -14,10 +14,10 @@ spring:
       password: ${REDIS_PASSWORD:}
 
 jwt:
-  secret: ${jwt.secret}
+  secret: ${JWT_SECRET}
 
 internal:
-  key: ${internal.key}
+  key: ${INTERNAL_KEY}
 
 services:
   location: ${LOCATION_SERVICE_URL:http://localhost:8082}

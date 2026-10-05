@@ -19,6 +19,11 @@ public class PricingController {
         this.demandService = demandService;
     }
 
+    @GetMapping("/api/v1/health")
+    public java.util.Map<String, String> health() {
+        return java.util.Map.of("status", "UP");
+    }
+
     @PostMapping("/internal/quote")
     public ResponseEntity<QuoteResponse> internalQuote(@RequestBody QuoteRequest request) {
         QuoteResponse response = pricingService.calculateQuote(request);

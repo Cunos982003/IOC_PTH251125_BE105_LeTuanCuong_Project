@@ -18,8 +18,8 @@ public class AuthFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         String path = request.getRequestURI();
 
-        // Skip auth for internal endpoints
-        if (path.startsWith("/internal/") || path.startsWith("/actuator/")) {
+        // Skip auth for health probes and internal endpoints
+        if (path.equals("/api/v1/health") || path.startsWith("/internal/") || path.startsWith("/actuator/")) {
             filterChain.doFilter(request, response);
             return;
         }

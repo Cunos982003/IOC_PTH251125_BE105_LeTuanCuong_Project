@@ -1,9 +1,12 @@
 spring:
+  config:
+    activate:
+      on-profile: infra
   data:
     redis:
-      host: redis
-      password: redispass
+      host: ${REDIS_HOST}
+      password: ${REDIS_PASSWORD}
 
 services:
-  location: http://location-service:8082
-  dispatch: http://dispatch-service:8083
+  location: ${LOCATION_SERVICE_URL}
+  dispatch: ${DISPATCH_SERVICE_URL}
