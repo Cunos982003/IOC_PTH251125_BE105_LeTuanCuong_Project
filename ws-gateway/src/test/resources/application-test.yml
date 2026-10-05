@@ -1,0 +1,5 @@
+jwt:
+  secret: ${JWT_SECRET:dGVzdC1zZWNyZXQta2V5LTMyLWJ5dGVzLWxvbmch}
+
+internal:
+  key: ${INTERNAL_KEY:test-internal-key}

@@ -1,0 +1,20 @@
+# Shell scripts - ensure LF line endings
+*.sh text eol=lf
+
+# Batch files - ensure CRLF line endings on Windows
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Configuration files - LF
+*.yml text eol=lf
+*.yaml text eol=lf
+*.properties text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.md text eol=lf
+
+# Java source - LF
+*.java text eol=lf
+
+# SQL migrations - LF
+*.sql text eol=lf

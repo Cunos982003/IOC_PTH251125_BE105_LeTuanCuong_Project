@@ -1,0 +1,8 @@
+{
+  "eventId": "550e8400-e29b-41d4-a716-446655440003",
+  "tripId": "550e8400-e29b-41d4-a716-446655440004",
+  "customerId": 12345,
+  "driverId": 67890,
+  "reason": "DRIVER_NOT_FOUND",
+  "cancelledAt": "2026-10-04T10:35:00Z"
+}

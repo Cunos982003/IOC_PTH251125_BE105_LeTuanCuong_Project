@@ -1,0 +1,9 @@
+spring:
+  data:
+    redis:
+      host: redis
+      password: redispass
+
+services:
+  location: http://location-service:8082
+  dispatch: http://dispatch-service:8083

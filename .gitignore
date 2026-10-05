@@ -1,0 +1,39 @@
+# Build outputs
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env
+*.env
+tokens.json
+
+# Logs
+*.log
+logs/
+*.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testcontainers
+.testcontainers/
+
+# Maven
+.mvn/timing.properties
+maven.log
+
+# Docker
+docker-compose.override.yml

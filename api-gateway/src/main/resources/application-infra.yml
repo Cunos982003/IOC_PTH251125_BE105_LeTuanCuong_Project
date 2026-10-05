@@ -1,0 +1,6 @@
+# api-gateway has no database or Redis dependencies
+# This file exists for consistency with other services
+spring:
+  config:
+    activate:
+      on-profile: infra

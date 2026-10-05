@@ -1,0 +1,4 @@
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Invalid request: lat is required"
+}

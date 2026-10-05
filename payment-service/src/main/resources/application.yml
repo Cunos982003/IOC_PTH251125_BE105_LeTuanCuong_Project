@@ -1,0 +1,44 @@
+server:
+  port: ${SERVER_PORT:8085}
+  shutdown: graceful
+
+spring:
+  application:
+    name: payment-service
+  threads:
+    virtual:
+      enabled: true
+  main:
+    allow-bean-definition-overriding: false
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: 6379
+      password: ${REDIS_PASSWORD}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+payment:
+  internal-key: ${INTERNAL_KEY}
+  commission-rate: ${COMMISSION_RATE:20}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+      base-path: /api/v1
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true

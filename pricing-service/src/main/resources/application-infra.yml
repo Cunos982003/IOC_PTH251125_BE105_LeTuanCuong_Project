@@ -1,0 +1,8 @@
+spring:
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+location-service:
+  url: http://location-service:8082

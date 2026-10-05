@@ -1,0 +1,27 @@
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+spring:
+  application:
+    name: user-service
+  threads:
+    virtual:
+      enabled: true
+  main:
+    allow-bean-definition-overriding: false
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+      base-path: /api/v1
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true

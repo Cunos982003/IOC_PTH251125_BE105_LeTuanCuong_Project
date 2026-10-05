@@ -1,0 +1,32 @@
+server:
+  port: ${SERVER_PORT:8001}
+
+spring:
+  application:
+    name: ws-gateway
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      password: ${REDIS_PASSWORD:}
+
+jwt:
+  secret: ${jwt.secret}
+
+internal:
+  key: ${internal.key}
+
+services:
+  location: ${LOCATION_SERVICE_URL:http://localhost:8082}
+  dispatch: ${DISPATCH_SERVICE_URL:http://localhost:8083}
+
+websocket:
+  auth-timeout-seconds: 5
+  ping-interval-seconds: 25
+  pong-timeout-seconds: 60
+  max-message-size: 4096
+  rate-limit-per-second: 5
+  location-batch-interval-ms: 200

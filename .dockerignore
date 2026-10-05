@@ -1,0 +1,40 @@
+# Build outputs
+target/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Environment
+.env
+.env.*
+*.env
+
+# Logs
+*.log
+logs/
+
+# Documentation
+docs/
+tools/
+
+# Docker
+Dockerfile
+docker-compose*.yml
+docker-compose.override.yml
+
+
+# Maven
+.mvn/
+maven.log
+
+# Testcontainers
+.testcontainers/
