@@ -42,7 +42,7 @@ public class TelemetryController {
 
         List<LocationRedisService.LocationUpdate> values = updates.stream().map(update ->
                 new LocationRedisService.LocationUpdate(update.driverId(), update.lat(), update.lng(),
-                        update.sentAt().toEpochMilli(), null)).toList();
+                        update.sentAt().toEpochMilli(), update.tripId())).toList();
         List<Long> processed = redisService.updateLocations(values);
         return ResponseEntity.ok(new LocationsResponse(processed.size()));
     }
@@ -139,7 +139,8 @@ public class TelemetryController {
     public record ErrorResponse(String code, String message) {}
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public record LocationRequest(long driverId, double lat, double lng,
-                                  @jakarta.validation.constraints.NotNull java.time.Instant sentAt) {}
+                                  @jakarta.validation.constraints.NotNull java.time.Instant sentAt,
+                                  String tripId) {}
 
     public record CountResponse(long count) {}
 

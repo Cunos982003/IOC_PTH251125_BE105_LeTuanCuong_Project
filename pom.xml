@@ -160,6 +160,7 @@
                     <version>3.3.0</version>
                     <configuration>
                         <useModulePath>false</useModulePath>
+                        <argLine>-Dnet.bytebuddy.experimental=true</argLine>
                     </configuration>
                 </plugin>
 

@@ -1,0 +1,24 @@
+# Default test configuration (loaded by all tests)
+# Note: DB and Redis config provided by Testcontainers via @DynamicPropertySource
+# Only set service URLs and internal key here
+
+spring:
+  datasource:
+    # Placeholder - actual values set by Testcontainers in @DynamicPropertySource
+    url: ${DB_URL:}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
+  data:
+    redis:
+      # Placeholder - actual values set by Testcontainers in @DynamicPropertySource
+      host: ${REDIS_HOST:}
+      password: ${REDIS_PASSWORD:}
+      port: ${REDIS_PORT:6379}
+
+# Service URLs (dummy values for mocked HTTP clients in tests)
+USER_SERVICE_URL: http://localhost:8081
+LOCATION_SERVICE_URL: http://localhost:8082
+PRICING_SERVICE_URL: http://localhost:8084
+PAYMENT_SERVICE_URL: http://localhost:8085
+WS_GATEWAY_URL: http://localhost:8001
+INTERNAL_KEY: test-internal-key-12345

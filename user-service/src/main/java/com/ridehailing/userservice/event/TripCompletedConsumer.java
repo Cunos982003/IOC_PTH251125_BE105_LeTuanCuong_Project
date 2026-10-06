@@ -123,7 +123,7 @@ public class TripCompletedConsumer implements SmartLifecycle {
 
                 List<MapRecord<String, Object, Object>> records = redisTemplate.opsForStream()
                         .read(Consumer.from(consumerGroup, consumerName),
-                              StreamReadOptions.empty().count(10).block(Duration.ofSeconds(2)),
+                              StreamReadOptions.empty().count(10).block(Duration.ofSeconds(1)),
                               StreamOffset.create("events.trips", ReadOffset.lastConsumed()));
 
                 // Check again after blocking read returns

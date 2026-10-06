@@ -128,8 +128,10 @@ class InternalTripControllerTest {
             .willReturn(WireMock.aResponse().withStatus(200)));
 
         // Mock WebSocket notification
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")));
 
         // Accept trip
         webTestClient.post()
@@ -166,7 +168,7 @@ class InternalTripControllerTest {
 
         // Verify external calls
         locationService.verify(1, WireMock.postRequestedFor(WireMock.urlEqualTo("/internal/drivers/" + driverId + "/busy")));
-        wsGateway.verify(1, WireMock.postRequestedFor(WireMock.urlEqualTo("/internal/notify/" + customerId)));
+        wsGateway.verify(1, WireMock.postRequestedFor(WireMock.urlEqualTo("/internal/push")));
     }
 
     @Test

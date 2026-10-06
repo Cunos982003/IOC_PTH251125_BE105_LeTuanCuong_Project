@@ -2,3 +2,11 @@ spring:
   task:
     scheduling:
       enabled: false
+
+# Test environment variables (dummy values for mocked services)
+USER_SERVICE_URL: http://localhost:8081
+LOCATION_SERVICE_URL: http://localhost:8082
+PRICING_SERVICE_URL: http://localhost:8084
+PAYMENT_SERVICE_URL: http://localhost:8085
+WS_GATEWAY_URL: http://localhost:8001
+INTERNAL_KEY: test-internal-key-12345
