@@ -12,7 +12,7 @@ local limit = tonumber(ARGV[4])
 local results = redis.call('GEOSEARCH', geoKey,
     'FROMLONLAT', lng, lat,
     'BYRADIUS', radiusKm, 'km',
-    'WITHDIST', 'ASC', 'COUNT', limit)
+    'WITHDIST', 'ASC', 'COUNT', limit, 'ANY')
 
 local output = {}
 for i, item in ipairs(results) do

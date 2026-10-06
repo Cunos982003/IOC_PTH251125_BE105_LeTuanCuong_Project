@@ -2,63 +2,133 @@ name: CI
 
 on:
   push:
-    branches:
-      - '**'
+    branches: [ main, master, develop ]
   pull_request:
-
-permissions:
-  contents: read
+    branches: [ main, master, develop ]
 
 jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Java 21
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
           java-version: '21'
-          cache: maven
+          distribution: 'temurin'
+          cache: 'maven'
 
-      - name: Run Maven verification
+      - name: Run tests
         run: mvn -B verify
 
-      - name: Upload Surefire/Failsafe reports on failure
+      - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
-          path: |
-            **/target/surefire-reports/**
-            **/target/failsafe-reports/**
-          if-no-files-found: ignore
+          name: surefire-reports
+          path: '**/target/surefire-reports/**'
+          retention-days: 7
 
   contracts:
-    name: Contracts
+    name: Check Contracts
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Validate contract copies
+      - name: Check contract consistency
         shell: pwsh
-        run: ./scripts/check-contracts.ps1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = $PWD
+          $services = @('user-service','location-service','dispatch-service','pricing-service','payment-service','ws-gateway','api-gateway')
+
+          function Read-Contract([string]$path) {
+              $full = Join-Path $root $path
+              if (!(Test-Path -LiteralPath $full -PathType Leaf)) {
+                  throw "Missing file: $path"
+              }
+              return ([IO.File]::ReadAllText($full)).Replace("`r`n", "`n").TrimEnd()
+          }
+
+          try {
+              $manifest = Read-Contract 'docs/contracts/manifest.json' | ConvertFrom-Json
+              $failed = @()
+              $expected = @{}
+
+              foreach ($entry in $manifest.contracts) {
+                  foreach ($suffix in $entry.files) {
+                      $source = "docs/contracts/$($entry.name)$suffix"
+                      $expected[$source] = $true
+                      $sourceText = Read-Contract $source
+
+                      if ($source.EndsWith('.json')) {
+                          $null = $sourceText | ConvertFrom-Json
+                      }
+
+                      foreach ($service in $entry.services) {
+                          if ($services -notcontains $service) {
+                              throw "Unknown service: $service"
+                          }
+                          $copy = "$service/src/test/resources/contracts/$($entry.name)$suffix"
+                          $expected[$copy] = $true
+
+                          try {
+                              if ((Read-Contract $copy) -cne $sourceText) {
+                                  $failed += "MISMATCH: $copy (source: $source)"
+                              }
+                          } catch {
+                              $failed += $_.Exception.Message
+                          }
+                      }
+                  }
+              }
+
+              $paths = @(Get-ChildItem (Join-Path $root 'docs/contracts') -Recurse -File | ForEach-Object {
+                  $_.FullName.Substring($root.Path.Length + 1).Replace('\','/')
+              })
+
+              foreach ($service in $services) {
+                  $dir = Join-Path $root "$service/src/test/resources/contracts"
+                  if (Test-Path $dir) {
+                      $paths += Get-ChildItem $dir -Recurse -File | ForEach-Object {
+                          $_.FullName.Substring($root.Path.Length + 1).Replace('\','/')
+                      }
+                  }
+              }
+
+              foreach ($path in $paths) {
+                  if ($path -match '^(docs/contracts/|[^/]+/src/test/resources/contracts/)' -and
+                      $path -match '\.(json|md)$' -and
+                      $path -notin @('docs/contracts/manifest.json','docs/contracts/README.md') -and
+                      !$expected.ContainsKey($path)) {
+                      $failed += "UNREGISTERED: $path"
+                  }
+              }
+
+              if ($failed.Count) {
+                  $failed | ForEach-Object { Write-Host "[FAIL] $_" -ForegroundColor Red }
+                  exit 1
+              }
+
+              Write-Host '[OK] All registered contract copies match.' -ForegroundColor Green
+              exit 0
+
+          } catch {
+              Write-Host "[FAIL] $($_.Exception.Message)" -ForegroundColor Red
+              exit 1
+          }
 
   images:
-    name: Docker image build (${{ matrix.module }})
-    needs:
-      - test
-      - contracts
+    name: Build Image - ${{ matrix.module }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+
     strategy:
-      fail-fast: false
       matrix:
         module:
           - user-service
@@ -68,21 +138,24 @@ jobs:
           - payment-service
           - ws-gateway
           - api-gateway
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build ${{ matrix.module }} image
-        uses: docker/build-push-action@v6
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          push: false
           build-args: |
             MODULE=${{ matrix.module }}
-          tags: ghcr.io/${{ github.repository_owner }}/ride-hailing-${{ matrix.module }}:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: false
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ride-hailing-${{ matrix.module }}:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/ride-hailing-${{ matrix.module }}:latest
+          cache-from: type=gha,scope=${{ matrix.module }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.module }}

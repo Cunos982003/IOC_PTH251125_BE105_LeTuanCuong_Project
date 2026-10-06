@@ -18,7 +18,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.*;
 
 @SpringBootTest(classes = InternalHttpContractTest.Config.class, properties = {"INTERNAL_KEY=contract-key", "internal.key=contract-key", "payment.internal-key=contract-key"})
 @AutoConfigureMockMvc
@@ -31,14 +30,25 @@ class InternalHttpContractTest {
         org.springframework.security.web.SecurityFilterChain contractSecurity(org.springframework.security.config.annotation.web.builders.HttpSecurity http) throws Exception {
             return http.csrf(csrf -> csrf.disable()).authorizeHttpRequests(auth -> auth.anyRequest().permitAll()).build();
         }
+
+        @org.springframework.context.annotation.Bean
+        UserRepository userRepository() {
+            return new UserRepository(null) {
+                @Override
+                public java.util.Optional<User> findById(Long id) {
+                    if (id == 12345L) {
+                        return java.util.Optional.of(new User(12345L, "x", "secret", "DRIVER", "Nguyen Van A", "x", java.time.Instant.EPOCH));
+                    }
+                    return java.util.Optional.empty();
+                }
+            };
+        }
     }
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
-    @MockBean UserRepository users;
 
     @Test
     void responsesMatchContractSamples() throws Exception {
-        when(users.findById(12345L)).thenReturn(java.util.Optional.of(new User(12345L, "x", "secret", "DRIVER", "Nguyen Van A", "x", java.time.Instant.EPOCH)));
         check(get("/internal/users/12345"), "user-get-user");
     }
 

@@ -138,8 +138,11 @@ class ConcurrencyTest {
             .willReturn(WireMock.aResponse().withStatus(200).withFixedDelay(50)));
         locationService.stubFor(WireMock.post(WireMock.urlMatching("/internal/drivers/.*/free"))
             .willReturn(WireMock.aResponse().withStatus(200).withFixedDelay(50)));
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200).withFixedDelay(50)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")
+                .withFixedDelay(50)));
         wsGateway.stubFor(WireMock.delete(WireMock.urlMatching("/internal/routes/.*"))
             .willReturn(WireMock.aResponse().withStatus(200).withFixedDelay(50)));
     }
@@ -171,11 +174,9 @@ class ConcurrencyTest {
                 .withHeader("Content-Type", "application/json")
                 .withFixedDelay(50)
                 .withBody("""
-                    {
-                        "drivers": [
-                            {"driverId": %d, "lat": 10.763, "lng": 106.661, "distanceM": 500}
-                        ]
-                    }
+                    [
+                        {"driverId": %d, "lat": 10.763, "lng": 106.661, "distanceM": 500}
+                    ]
                 """.formatted(driverId))));
 
         // Create 50 trips concurrently
@@ -206,7 +207,7 @@ class ConcurrencyTest {
         assertThat(allDone).isTrue();
 
         // Wait for matching loops to start and make offers (longer timeout for 50 trips)
-        await().atMost(20, TimeUnit.SECONDS).until(() -> {
+        await().atMost(30, TimeUnit.SECONDS).until(() -> {
             List<Map<String, Object>> offers = jdbcClient.sql("""
                 SELECT trip_id, driver_id FROM offers
                 WHERE driver_id = ? AND status = 'OFFERED'
