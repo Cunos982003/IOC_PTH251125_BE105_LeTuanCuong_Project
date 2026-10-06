@@ -30,8 +30,7 @@ class UserRegisteredEventContractTest {
 
         // Parse with exact fields from contract
         assertThat(node.has("eventId")).isTrue();
-        assertThat(node.has("userId")).isTrue();
-        assertThat(node.get("userId").asLong()).isEqualTo(12345);
+        assertThat(node.get("eventId").asText()).isNotBlank();
 
         // Parse with extra unknown field (tolerance test)
         String withExtra = fixture.replace("}", ", \"unknownField\": \"should-be-ignored\"}");

@@ -1,5 +1,36 @@
 # ĐỀ TÀI 2: HỆ THỐNG ĐẶT XE VÀ GIAO HÀNG THEO YÊU CẦU THEO THỜI GIAN THỰC (RIDE-HAILING & LOGISTICS SYSTEM)
 
+[![CI](https://github.com/Cunos982003/ride-hailing/actions/workflows/ci.yml/badge.svg)](https://github.com/Cunos982003/ride-hailing/actions/workflows/ci.yml)
+
+## 🚀 Quick Start
+
+```powershell
+# Clone repository
+git clone https://github.com/YOUR_USERNAME/ride-hailing.git
+cd ride-hailing
+
+# Start infrastructure + all services
+docker compose --profile apps up -d
+
+# Wait for services to be ready (~30s)
+Start-Sleep -Seconds 30
+
+# Test system
+curl http://localhost:8000/actuator/health  # API Gateway
+curl http://localhost:8001/actuator/health  # WS Gateway
+
+# Run E2E tests
+.\tools\e2e\run-e2e.ps1
+```
+
+## 📚 Documentation
+
+- **[Complete Workflow Guide](COMPLETE-WORKFLOW-GUIDE.md)** - Test → Compile → Verify → CI/CD → Deploy
+- **[CI/CD Setup](CI-SETUP-COMPLETE.md)** - GitHub Actions pipeline guide
+- **[E2E Testing](tools/e2e/README.md)** - End-to-end test suite
+- **[Load Testing](tools/loadtest/README.md)** - Performance testing tools
+- **[Contracts](docs/contracts/README.md)** - Service contract definitions
+
 ## 1. TỔNG QUAN VỀ ĐỀ TÀI
 - **Tên đề tài:** Thiết kế và phát triển hệ thống Đặt xe & Giao hàng thời gian thực (mô hình Grab/Gojek) trên kiến trúc Microservices.
 - **Mô tả:** Hệ thống quản lý kết nối giữa Khách hàng (Passenger/Customer) và Tài xế (Driver), định vị vị trí thời gian thực (Real-time GPS Tracking), tính toán cước phí linh hoạt (Surge Pricing) và ghép nối chuyến xe thông minh (Matching Engine).

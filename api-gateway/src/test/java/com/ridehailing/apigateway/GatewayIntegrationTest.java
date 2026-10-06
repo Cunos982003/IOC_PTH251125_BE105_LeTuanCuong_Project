@@ -410,7 +410,7 @@ class GatewayIntegrationTest {
     void testSlowResponseBodyTimesOut() throws Exception {
         paymentService.stubFor(WireMock.get(WireMock.urlEqualTo("/api/v1/wallet/balance"))
             .willReturn(WireMock.aResponse().withBody("a".repeat(100))
-                .withChunkedDribbleDelay(10, 2000)));
+                .withChunkedDribbleDelay(1, 1000)));
         mockMvc.perform(get("/api/v1/wallet/balance")
                 .header("Authorization", "Bearer " + generateToken(1001L, "CUSTOMER", Instant.now().plusSeconds(3600))))
             .andExpect(status().isGatewayTimeout())

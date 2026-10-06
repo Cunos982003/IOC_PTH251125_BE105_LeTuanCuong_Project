@@ -148,8 +148,10 @@ class DispatchServiceIntegrationTest {
                 """)));
 
         // Mock ws-gateway (best-effort, won't fail if it errors)
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")));
 
         Map<String, Object> request = Map.of(
             "pickupLat", 10.762622,
@@ -210,8 +212,10 @@ class DispatchServiceIntegrationTest {
                     {"balance": 100000}
                 """)));
 
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")));
 
         Map<String, Object> request = Map.of(
             "pickupLat", 10.762622,
