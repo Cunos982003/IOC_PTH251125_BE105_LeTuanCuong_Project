@@ -164,7 +164,8 @@ public class TripCompletedConsumer implements SmartLifecycle {
             TripCompletedEvent event = objectMapper.readValue(payload, TripCompletedEvent.class);
 
             // Only process TripCompleted events
-            if (event.tripId() != null && event.customerId() != null && event.driverId() != null) {
+            if (event.completedAt() != null && event.fare() != null && event.tripId() != null
+                    && event.customerId() != null && event.driverId() != null) {
                 tripHistoryRepository.insertIfNotExists(
                         event.tripId(),
                         event.customerId(),

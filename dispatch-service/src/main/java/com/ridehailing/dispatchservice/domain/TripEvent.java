@@ -56,7 +56,11 @@ public sealed interface TripEvent permits
         public String eventType() { return "TRIP_IN_PROGRESS"; }
     }
 
-    record TripCompleted(UUID eventId, UUID tripId, long driverId, long fare, Instant timestamp) implements TripEvent {
+    record TripCompleted(UUID eventId, UUID tripId, long customerId, long driverId, long fare,
+                         Instant completedAt) implements TripEvent {
+        @Override
+        public Instant timestamp() { return completedAt; }
+
         @Override
         public String eventType() { return "TRIP_COMPLETED"; }
     }
@@ -66,10 +70,12 @@ public sealed interface TripEvent permits
             UUID tripId,
             Long customerId,
             Long driverId,
-            TripStatus fromStatus,
             String reason,
-            Instant timestamp
+            Instant cancelledAt
     ) implements TripEvent {
+        @Override
+        public Instant timestamp() { return cancelledAt; }
+
         @Override
         public String eventType() { return "TRIP_CANCELLED"; }
     }

@@ -167,13 +167,13 @@ public class TripEventsConsumer implements SmartLifecycle {
             String payload = payloadObj.toString();
             TripEvent event = objectMapper.readValue(payload, TripEvent.class);
 
-            if ("TripCompleted".equals(event.eventType())) {
+            if (event.completed()) {
                 if (event.tripId() != null && event.customerId() != null
                         && event.driverId() != null && event.fare() != null) {
                     settlementService.settle(event.tripId(), event.customerId(),
                                             event.driverId(), event.fare());
                 }
-            } else if ("TripCancelled".equals(event.eventType())) {
+            } else if (event.cancelled()) {
                 // Just acknowledge, no payment processing
             }
 

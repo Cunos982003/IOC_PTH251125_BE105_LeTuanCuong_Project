@@ -27,36 +27,39 @@ public class TelemetryController {
     }
 
     @PostMapping("/locations")
-    public ResponseEntity<LocationsResponse> updateLocations(
-            @Valid @RequestBody List<LocationRedisService.LocationUpdate> updates) {
+    public ResponseEntity<?> updateLocations(
+            @Valid @RequestBody List<LocationRequest> updates) {
 
         if (updates == null || updates.isEmpty()) {
             return ResponseEntity.badRequest()
-                    .body(new LocationsResponse("VALIDATION_ERROR", "Request body must be a non-empty array"));
+                    .body(new ErrorResponse("VALIDATION_ERROR", "Request body must be a non-empty array"));
         }
 
         if (updates.size() > 1000) {
             return ResponseEntity.badRequest()
-                    .body(new LocationsResponse("VALIDATION_ERROR", "Maximum 1000 updates per request"));
+                    .body(new ErrorResponse("VALIDATION_ERROR", "Maximum 1000 updates per request"));
         }
 
-        List<Long> processed = redisService.updateLocations(updates);
-        return ResponseEntity.ok(new LocationsResponse("OK", processed.size(), processed));
+        List<LocationRedisService.LocationUpdate> values = updates.stream().map(update ->
+                new LocationRedisService.LocationUpdate(update.driverId(), update.lat(), update.lng(),
+                        update.sentAt().toEpochMilli(), null)).toList();
+        List<Long> processed = redisService.updateLocations(values);
+        return ResponseEntity.ok(new LocationsResponse(processed.size()));
     }
 
     @GetMapping("/drivers/nearby")
     public ResponseEntity<?> getNearbyDrivers(
             @RequestParam double lat,
             @RequestParam double lng,
-            @RequestParam double radiusKm,
+            @RequestParam(name = "radiusM", defaultValue = "2000") double radiusM,
             @RequestParam @Min(1) @Max(50) int limit) {
 
-        if (!isValidLat(lat) || !isValidLng(lng) || !isValidRadiusKm(radiusKm)) {
+        if (!isValidLat(lat) || !isValidLng(lng) || !isValidRadiusKm(radiusM / 1000.0)) {
             return ResponseEntity.badRequest()
-                    .body(new LocationsResponse("VALIDATION_ERROR", "Invalid coordinates or radius"));
+                    .body(new ErrorResponse("VALIDATION_ERROR", "Invalid coordinates or radius"));
         }
 
-        List<LocationRedisService.NearbyDriver> nearby = redisService.getNearbyDrivers(lat, lng, radiusKm, limit);
+        List<LocationRedisService.NearbyDriver> nearby = redisService.getNearbyDrivers(lat, lng, radiusM / 1000.0, limit);
         return ResponseEntity.ok(nearby);
     }
 
@@ -64,14 +67,14 @@ public class TelemetryController {
     public ResponseEntity<CountResponse> getDriverCount(
             @RequestParam double lat,
             @RequestParam double lng,
-            @RequestParam double radiusKm) {
+            @RequestParam(name = "radiusM", defaultValue = "2000") double radiusM) {
 
-        if (!isValidLat(lat) || !isValidLng(lng) || !isValidRadiusKm(radiusKm)) {
+        if (!isValidLat(lat) || !isValidLng(lng) || !isValidRadiusKm(radiusM / 1000.0)) {
             return ResponseEntity.badRequest()
                     .body(new CountResponse(0));
         }
 
-        long count = redisService.getDriverCount(lat, lng, radiusKm);
+        long count = redisService.getDriverCount(lat, lng, radiusM / 1000.0);
         return ResponseEntity.ok(new CountResponse(count));
     }
 
@@ -83,11 +86,11 @@ public class TelemetryController {
 
         if (!"dispatch-service".equals(callerService)) {
             return ResponseEntity.status(403)
-                    .body(new LocationsResponse("FORBIDDEN", "Only dispatch-service can mark driver busy"));
+                    .body(new ErrorResponse("FORBIDDEN", "Only dispatch-service can mark driver busy"));
         }
 
         redisService.markBusy(id, request.tripId());
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(java.util.Map.of("status", "BUSY"));
     }
 
     @PostMapping("/drivers/{id}/free")
@@ -97,11 +100,11 @@ public class TelemetryController {
 
         if (!"dispatch-service".equals(callerService)) {
             return ResponseEntity.status(403)
-                    .body(new LocationsResponse("FORBIDDEN", "Only dispatch-service can mark driver free"));
+                    .body(new ErrorResponse("FORBIDDEN", "Only dispatch-service can mark driver free"));
         }
 
         redisService.markFree(id);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(java.util.Map.of("status", "ONLINE"));
     }
 
     @DeleteMapping("/drivers/{id}")
@@ -112,7 +115,7 @@ public class TelemetryController {
         // Only dispatch-service and user-service can delete drivers
         if (!"dispatch-service".equals(callerService) && !"user-service".equals(callerService)) {
             return ResponseEntity.status(403)
-                    .body(new LocationsResponse("FORBIDDEN", "Caller service not authorized for this operation"));
+                    .body(new ErrorResponse("FORBIDDEN", "Caller service not authorized for this operation"));
         }
 
         redisService.deleteDriver(id);
@@ -132,11 +135,11 @@ public class TelemetryController {
     }
 
     // Response DTOs
-    public record LocationsResponse(String status, int processed, List<Long> driverIds) {
-        public LocationsResponse(String code, String message) {
-            this(code, 0, List.of());
-        }
-    }
+    public record LocationsResponse(int accepted) {}
+    public record ErrorResponse(String code, String message) {}
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    public record LocationRequest(long driverId, double lat, double lng,
+                                  @jakarta.validation.constraints.NotNull java.time.Instant sentAt) {}
 
     public record CountResponse(long count) {}
 

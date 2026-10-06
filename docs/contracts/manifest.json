@@ -1,0 +1,216 @@
+{
+    "contracts":  [
+                      {
+                          "name":  "events/TripCancelled",
+                          "files":  [
+                                        ".json",
+                                        ".md"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "payment-service",
+                                           "user-service"
+                                       ]
+                      },
+                      {
+                          "name":  "events/TripCompleted",
+                          "files":  [
+                                        ".json",
+                                        ".md"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "payment-service",
+                                           "user-service"
+                                       ]
+                      },
+                      {
+                          "name":  "events/UserRegistered",
+                          "files":  [
+                                        ".json",
+                                        ".md"
+                                    ],
+                          "services":  [
+                                           "payment-service",
+                                           "user-service"
+                                       ]
+                      },
+                      {
+                          "name":  "http/dispatch-post-accept",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
+                          "name":  "http/error-format",
+                          "files":  [
+                                        ".json",
+                                        ".md"
+                                    ],
+                          "services":  [
+                                           "api-gateway",
+                                           "dispatch-service",
+                                           "location-service",
+                                           "payment-service",
+                                           "pricing-service",
+                                           "user-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
+                          "name":  "http/location-get-count",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "location-service",
+                                           "pricing-service"
+                                       ]
+                      },
+                      {
+                          "name":  "http/location-get-nearby",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "location-service"
+                                       ]
+                      },
+                      {
+                          "name":  "http/location-post-busy",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "location-service"
+                                       ]
+                      },
+                      {
+                          "name":  "http/location-post-free",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "location-service"
+                                       ]
+                      },
+                      {
+                          "name":  "http/location-post-locations",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "location-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
+                          "name":  "http/payment-get-balance",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "api-gateway",
+                                           "dispatch-service",
+                                           "payment-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
+                          "name":  "http/pricing-post-demand",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "pricing-service"
+                                       ]
+                      },
+                      {
+                          "name":  "http/pricing-post-quote",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "pricing-service"
+                                       ]
+                      },
+                      {
+                          "name":  "http/user-get-user",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "api-gateway",
+                                           "dispatch-service",
+                                           "payment-service",
+                                           "user-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
+                          "name":  "http/ws-delete-routes",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
+                          "name":  "http/ws-push",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
+                          "name":  "http/ws-put-routes",
+                          "files":  [
+                                        ".json",
+                                        ".md",
+                                        ".response.json"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "ws-gateway"
+                                       ]
+                      }
+                  ]
+}

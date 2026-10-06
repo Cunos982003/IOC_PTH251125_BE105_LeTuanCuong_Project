@@ -42,7 +42,7 @@ class DemandServiceTest {
         @Bean
         @Primary
         public LocationClient locationClient() {
-            return new LocationClient("http://localhost:9999", 500) {
+            return new LocationClient("http://localhost:9999", 500, "test-key") {
                 @Override
                 public int getDriverCount(double lat, double lng, double radiusKm) {
                     return 2; // Giả định luôn có 2 tài xế

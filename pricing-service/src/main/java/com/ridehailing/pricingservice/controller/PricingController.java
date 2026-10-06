@@ -31,9 +31,9 @@ public class PricingController {
     }
 
     @PostMapping("/internal/demand")
-    public ResponseEntity<Void> recordDemand(@RequestBody DemandRequest request) {
+    public ResponseEntity<java.util.Map<String, Boolean>> recordDemand(@RequestBody DemandRequest request) {
         demandService.recordDemand(request.tripId(), request.lat(), request.lng());
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(java.util.Map.of("recorded", true));
     }
 
     @PostMapping("/api/v1/quote")

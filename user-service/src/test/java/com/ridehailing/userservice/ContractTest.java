@@ -1,5 +1,6 @@
 package com.ridehailing.userservice;
 
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ridehailing.userservice.event.TripCompletedEvent;
@@ -19,7 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ContractTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper()
-            .registerModule(new JavaTimeModule());
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Test
     void userRegisteredEvent_matchesContract() throws IOException {
@@ -49,9 +51,10 @@ class ContractTest {
 
         String json = objectMapper.writeValueAsString(event);
 
-        // Verify it can be parsed back
-        UserRegisteredEvent parsed = objectMapper.readValue(json, UserRegisteredEvent.class);
-        assertThat(parsed).isEqualTo(event);
+        try (InputStream sample = getClass().getResourceAsStream("/contracts/events/UserRegistered.json")) {
+            assertThat(sample).isNotNull();
+            assertThat(objectMapper.readTree(json)).isEqualTo(objectMapper.readTree(sample));
+        }
     }
 
     @Test

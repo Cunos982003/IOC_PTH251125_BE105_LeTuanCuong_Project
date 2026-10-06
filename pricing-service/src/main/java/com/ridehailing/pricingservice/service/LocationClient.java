@@ -14,15 +14,15 @@ public class LocationClient {
     private static final Logger log = LoggerFactory.getLogger(LocationClient.class);
 
     private final RestClient restClient;
-
-    @Value("${internal.key}")
-    private String internalKey;
+    private final String internalKey;
 
     public LocationClient(@Value("${location-service.url}") String baseUrl,
-                          @Value("${location-service.timeout-ms}") long timeoutMs) {
+                          @Value("${location-service.timeout-ms}") long timeoutMs,
+                          @Value("${internal.key}") String internalKey) {
         this.restClient = RestClient.builder()
             .baseUrl(baseUrl)
             .build();
+        this.internalKey = internalKey;
     }
 
     public int getDriverCount(double lat, double lng, double radiusKm) {
@@ -32,7 +32,7 @@ public class LocationClient {
                     .path("/internal/drivers/count")
                     .queryParam("lat", lat)
                     .queryParam("lng", lng)
-                    .queryParam("radiusKm", radiusKm)
+                    .queryParam("radiusM", Math.round(radiusKm * 1000))
                     .build())
                 .header("X-Internal-Key", internalKey)
                 .retrieve()

@@ -18,6 +18,7 @@ target/
 .env
 *.env
 tokens.json
+tools/loadtest/tokens.json
 
 # Logs
 *.log

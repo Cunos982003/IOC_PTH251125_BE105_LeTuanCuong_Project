@@ -86,6 +86,11 @@
             <version>2.2.2</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- ArchUnit for architecture tests -->
         <dependency>
             <groupId>com.tngtech.archunit</groupId>

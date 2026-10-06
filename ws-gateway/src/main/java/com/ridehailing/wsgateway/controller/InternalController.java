@@ -52,22 +52,22 @@ public class InternalController {
             var session = sessionManager.getSession(request.userId());
             boolean delivered = session != null && session.isOpen();
 
-            return ResponseEntity.accepted().body(new PushResponse(delivered));
+            return ResponseEntity.ok(new PushResponse(delivered));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(new PushResponse(false));
         }
     }
 
     @PutMapping("/routes/{driverId}")
-    public ResponseEntity<Void> setRoute(@PathVariable String driverId,
+    public ResponseEntity<Map<String, Boolean>> setRoute(@PathVariable String driverId,
                                          @RequestBody SetRouteRequest request) {
         routingService.setRoute(driverId, request.customerId());
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(Map.of("mapped", true));
     }
 
     @DeleteMapping("/routes/{driverId}")
-    public ResponseEntity<Void> deleteRoute(@PathVariable String driverId) {
+    public ResponseEntity<Map<String, Boolean>> deleteRoute(@PathVariable String driverId) {
         routingService.deleteRoute(driverId);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(Map.of("deleted", true));
     }
 }

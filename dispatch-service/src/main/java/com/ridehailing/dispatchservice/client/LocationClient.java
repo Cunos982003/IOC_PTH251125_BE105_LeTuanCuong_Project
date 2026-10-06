@@ -26,6 +26,7 @@ public class LocationClient {
         this.restClient = RestClient.builder()
             .baseUrl(baseUrl)
             .defaultHeader("X-Internal-Key", internalKey)
+            .defaultHeader("X-Caller-Service", "dispatch-service")
             .defaultHeader("Accept", "application/json")
             .requestFactory(requestFactory)
             .messageConverters(converters -> converters.add(jacksonConverter))
@@ -33,34 +34,35 @@ public class LocationClient {
     }
 
     public List<DriverLocation> nearby(double lat, double lng, int radiusM, int limit) {
-        NearbyDriversResponse response = restClient.get()
-            .uri("/internal/drivers/nearby?lat={lat}&lng={lng}&radius={radius}&limit={limit}",
+        DriverLocation[] response = restClient.get()
+            .uri("/internal/drivers/nearby?lat={lat}&lng={lng}&radiusM={radius}&limit={limit}",
                  lat, lng, radiusM, limit)
             .retrieve()
-            .body(NearbyDriversResponse.class);
+            .body(DriverLocation[].class);
 
-        return response != null ? response.drivers() : List.of();
+        return response != null ? List.of(response) : List.of();
     }
 
-    public void busy(long driverId, UUID tripId) {
-        restClient.post()
+    public StatusResponse busy(long driverId, UUID tripId) {
+        return restClient.post()
             .uri("/internal/drivers/{driverId}/busy", driverId)
             .body(new BusyRequest(tripId.toString()))
             .retrieve()
             .onStatus(HttpStatusCode::isError, (req, res) -> {
                 System.err.println("Failed to mark driver busy: " + res.getStatusCode());
             })
-            .toBodilessEntity();
+            .body(StatusResponse.class);
     }
 
-    public void free(long driverId) {
-        restClient.post()
+    public StatusResponse free(long driverId) {
+        return restClient.post()
             .uri("/internal/drivers/{driverId}/free", driverId)
+            .body(java.util.Map.of())
             .retrieve()
             .onStatus(HttpStatusCode::isError, (req, res) -> {
                 System.err.println("Failed to mark driver free: " + res.getStatusCode());
             })
-            .toBodilessEntity();
+            .body(StatusResponse.class);
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -68,6 +70,9 @@ public class LocationClient {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record DriverLocation(long driverId, double lat, double lng, double distanceM) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record StatusResponse(String status) {}
 
     public record BusyRequest(String tripId) {}
 }

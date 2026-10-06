@@ -109,6 +109,7 @@ public class TripActionService {
         TripEvent.TripCompleted event = new TripEvent.TripCompleted(
             UUID.randomUUID(),
             tripId,
+            trip.customerId(),
             driverId,
             trip.fare(),
             Instant.now()
@@ -142,10 +143,9 @@ public class TripActionService {
         TripEvent.TripCancelled event = new TripEvent.TripCancelled(
             UUID.randomUUID(),
             tripId,
-            isCustomer ? trip.customerId() : null,
-            isTripDriver ? trip.driverId() : null,
-            trip.status(),
-            isDriver ? "driver_cancelled" : "customer_cancelled",
+            trip.customerId(),
+            trip.driverId(),
+            isDriver ? "DRIVER_CANCEL" : "CUSTOMER_CANCEL",
             Instant.now()
         );
 

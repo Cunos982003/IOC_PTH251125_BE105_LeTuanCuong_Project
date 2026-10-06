@@ -20,7 +20,7 @@ public class PricingClient {
                          MappingJackson2HttpMessageConverter jacksonConverter) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(2000);
-        requestFactory.setReadTimeout(5000);
+        requestFactory.setReadTimeout(2000);
 
         this.restClient = RestClient.builder()
             .baseUrl(baseUrl)
@@ -33,7 +33,7 @@ public class PricingClient {
 
     public QuoteResponse getQuote(double pickupLat, double pickupLng,
                                    double dropoffLat, double dropoffLng) {
-        QuoteRequest request = new QuoteRequest(pickupLat, pickupLng, dropoffLat, dropoffLng);
+        QuoteRequest request = new QuoteRequest(new Point(pickupLat, pickupLng), new Point(dropoffLat, dropoffLng));
         return restClient.post()
             .uri("/internal/quote")
             .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
@@ -45,8 +45,8 @@ public class PricingClient {
             .body(QuoteResponse.class);
     }
 
-    public record QuoteRequest(double pickupLat, double pickupLng,
-                               double dropoffLat, double dropoffLng) {}
+    public record Point(double lat, double lng) {}
+    public record QuoteRequest(Point pickup, Point dropoff) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record QuoteResponse(long distanceM, long fare, BigDecimal surge) {}
