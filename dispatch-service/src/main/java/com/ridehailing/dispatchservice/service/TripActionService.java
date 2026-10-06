@@ -57,12 +57,16 @@ public class TripActionService {
             Instant.now()
         );
 
-        Trip updated = tripRepository.transition(trip, TripStatus.PICKING_UP, event);
+        try {
+            Trip updated = tripRepository.transition(trip, TripStatus.PICKING_UP, event);
 
-        // Notify customer
-        notifyBestEffort(() -> wsGatewayClient.notifyTripUpdate(trip.customerId(), tripId, "PICKING_UP"));
+            // Notify customer
+            notifyBestEffort(() -> wsGatewayClient.notifyTripUpdate(trip.customerId(), tripId, "PICKING_UP"));
 
-        return updated;
+            return updated;
+        } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+            throw new InvalidStateException("Trip state was modified by another operation");
+        }
     }
 
     @Transactional
@@ -85,12 +89,16 @@ public class TripActionService {
             Instant.now()
         );
 
-        Trip updated = tripRepository.transition(trip, TripStatus.IN_TRIP, event);
+        try {
+            Trip updated = tripRepository.transition(trip, TripStatus.IN_TRIP, event);
 
-        // Notify customer
-        notifyBestEffort(() -> wsGatewayClient.notifyTripUpdate(trip.customerId(), tripId, "IN_TRIP"));
+            // Notify customer
+            notifyBestEffort(() -> wsGatewayClient.notifyTripUpdate(trip.customerId(), tripId, "IN_TRIP"));
 
-        return updated;
+            return updated;
+        } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+            throw new InvalidStateException("Trip state was modified by another operation");
+        }
     }
 
     @Transactional
@@ -115,12 +123,16 @@ public class TripActionService {
             Instant.now()
         );
 
-        Trip updated = tripRepository.transition(trip, TripStatus.COMPLETED, event);
+        try {
+            Trip updated = tripRepository.transition(trip, TripStatus.COMPLETED, event);
 
-        // Post-commit cleanup
-        cleanupAfterTrip(driverId, tripId, trip.customerId());
+            // Post-commit cleanup
+            cleanupAfterTrip(driverId, tripId, trip.customerId());
 
-        return updated;
+            return updated;
+        } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+            throw new InvalidStateException("Trip state was modified by another operation");
+        }
     }
 
     @Transactional
@@ -149,14 +161,18 @@ public class TripActionService {
             Instant.now()
         );
 
-        Trip updated = tripRepository.transition(trip, TripStatus.CANCELLED, event);
+        try {
+            Trip updated = tripRepository.transition(trip, TripStatus.CANCELLED, event);
 
-        // Post-commit cleanup if driver was assigned
-        if (trip.driverId() != null) {
-            cleanupAfterTrip(trip.driverId(), tripId, trip.customerId());
+            // Post-commit cleanup if driver was assigned
+            if (trip.driverId() != null) {
+                cleanupAfterTrip(trip.driverId(), tripId, trip.customerId());
+            }
+
+            return updated;
+        } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+            throw new InvalidStateException("Trip state was modified by another operation");
         }
-
-        return updated;
     }
 
     private void cleanupAfterTrip(long driverId, UUID tripId, long customerId) {

@@ -134,17 +134,18 @@ public class TripRepository {
         int rowsUpdated = jdbcClient.sql("""
             UPDATE trips
             SET status = ?, updated_at = ?, version = version + 1
-            WHERE id = ? AND version = ?
+            WHERE id = ? AND version = ? AND status = ?
         """)
             .param(newStatus.name())
             .param(Timestamp.from(updated.updatedAt()))
             .param(trip.id())
             .param(trip.version())
+            .param(trip.status().name())
             .update();
 
         if (rowsUpdated == 0) {
             throw new OptimisticLockingFailureException(
-                "Trip was modified by another transaction: " + trip.id()
+                "Trip was modified by another transaction or status changed: " + trip.id()
             );
         }
 
@@ -187,17 +188,18 @@ public class TripRepository {
         int rowsUpdated = jdbcClient.sql("""
             UPDATE trips
             SET driver_id = ?, updated_at = ?, version = version + 1
-            WHERE id = ? AND version = ?
+            WHERE id = ? AND version = ? AND status = ?
         """)
             .param(driverId)
             .param(Timestamp.from(updated.updatedAt()))
             .param(trip.id())
             .param(trip.version())
+            .param(trip.status().name())
             .update();
 
         if (rowsUpdated == 0) {
             throw new OptimisticLockingFailureException(
-                "Trip was modified by another transaction: " + trip.id()
+                "Trip was modified by another transaction or status changed: " + trip.id()
             );
         }
 

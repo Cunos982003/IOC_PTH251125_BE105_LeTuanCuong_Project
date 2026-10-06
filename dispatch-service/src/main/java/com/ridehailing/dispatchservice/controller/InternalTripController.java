@@ -94,6 +94,10 @@ public class InternalTripController {
                 "status", "ACCEPTED"
             ));
 
+        } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+            // Trip was modified by another transaction (e.g., customer cancelled)
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("code", "TRIP_MODIFIED", "message", "Trip was modified by another operation"));
         } catch (Exception e) {
             String msg = e.getMessage();
             if (msg != null && (msg.contains("uq_driver_active_trip") ||
