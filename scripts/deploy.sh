@@ -1,147 +1,84 @@
 #!/bin/bash
-# Generate production .env with strong passwords
+# =============================================================================
+# Deploy script for Ride-Hailing (run on VPS/Linux)
+#   - Generates .env with random secrets if missing
+#   - Pulls latest code, builds images, starts all services
+#   - Waits until every container reports healthy
+#
+# Usage:  ./scripts/deploy.sh
+# =============================================================================
 
 set -euo pipefail
 
-DOMAIN="${1:-ride-api.yourdomain.com}"
-OUTPUT_FILE=".env"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+LOG_LINES="${LOG_LINES:-50}"
 
-# Generate random password (32 characters)
-gen_pass() {
-    openssl rand -base64 32 | tr -d "=+/" | cut -c1-32
-}
+# Repo root (parent of scripts/)
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 
-cat > "$OUTPUT_FILE" <<EOF
-# Production Environment Variables
-# Generated: $(date)
+echo "=============================================="
+echo " Ride-Hailing — Deploy"
+echo "=============================================="
 
-# Domain
-DOMAIN=$DOMAIN
-
-# Database passwords (IMPORTANT: Change these from default)
-POSTGRES_PASSWORD=$(gen_pass)
-USER_DB_PASSWORD=$(gen_pass)
-LOCATION_DB_PASSWORD=$(gen_pass)
-DISPATCH_DB_PASSWORD=$(gen_pass)
-PAYMENT_DB_PASSWORD=$(gen_pass)
-
-# Redis password
-REDIS_PASSWORD=$(gen_pass)
-
-# JWT secret (min 256 bits)
-JWT_SECRET=$(gen_pass)
-
-# Internal service key
-INTERNAL_KEY=$(gen_pass)
-
-# Port bindings (only localhost)
-API_GATEWAY_PORT=127.0.0.1:8000
-WS_GATEWAY_PORT_1=127.0.0.1:8001
-WS_GATEWAY_PORT_2=127.0.0.1:8011
-
-# Service URLs (internal Docker network)
-USER_SERVICE_URL=http://user-service:8081
-LOCATION_SERVICE_URL=http://location-service:8082
-DISPATCH_SERVICE_URL=http://dispatch-service:8083
-PRICING_SERVICE_URL=http://pricing-service:8084
-PAYMENT_SERVICE_URL=http://payment-service:8085
-WS_GATEWAY_URL=http://ws-gateway-1:8001
-
-# Replica configuration
-WS_GATEWAY_REPLICAS=2
+# --- 1. Secrets (.env) -------------------------------------------------------
+if [[ ! -f .env ]]; then
+  echo "→ .env not found, generating random secrets..."
+  cat > .env <<EOF
+JWT_SECRET=$(openssl rand -base64 48)
+INTERNAL_KEY=$(openssl rand -hex 32)
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+USER_DB_PASSWORD=$(openssl rand -hex 24)
+LOCATION_DB_PASSWORD=$(openssl rand -hex 24)
+DISPATCH_DB_PASSWORD=$(openssl rand -hex 24)
+PAYMENT_DB_PASSWORD=$(openssl rand -hex 24)
+REDIS_PASSWORD=$(openssl rand -hex 24)
+CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}
+IMAGE_TAG=latest
 EOF
+  chmod 600 .env
+  echo "✓ .env generated. Passwords only apply to fresh volumes."
+fi
 
-chmod 600 "$OUTPUT_FILE"
-echo "✓ .env generated: $OUTPUT_FILE"
-echo "⚠  Passwords only apply to NEW volumes. For existing volumes, use ALTER USER."
-echo ""
-echo "Next steps:"
-echo "1. Review .env file"
-echo "2. Copy to project directory: cp .env ~/ride-hailing/.env"
-echo "3. Run deployment: cd ~/ride-hailing && ./deploy.sh"
-```
+# --- 2. Latest code ----------------------------------------------------------
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "→ Pulling latest code..."
+  git pull --ff-only || echo "⚠ git pull skipped (uncommitted changes?)"
+fi
 
-Tạo script deploy.sh:
+# --- 3. Build + start --------------------------------------------------------
+echo "→ Building and starting all services..."
+docker compose --profile apps up -d --build
 
-<function_calls>
-<invoke name="Write">
-<parameter name="content">#!/bin/bash
-# Production deployment script
-
-set -euo pipefail
-
-COMPOSE_FILE="docker-compose.yml"
-HEALTH_TIMEOUT=120
-LOG_LINES=50
-
-echo "=========================================="
-echo "Starting deployment..."
-echo "=========================================="
-
-# Pull latest code
-echo "→ Pulling latest code..."
-git pull origin main
-
-# Build services
-echo "→ Building services..."
-docker compose --profile apps build
-
-# Deploy ws-gateway replicas one by one to avoid mass WebSocket disconnect
-echo "→ Deploying ws-gateway replica 1..."
-docker compose up -d ws-gateway-1
-sleep 5
-
-echo "→ Deploying ws-gateway replica 2..."
-docker compose up -d ws-gateway-2
-sleep 5
-
-# Deploy other services
-echo "→ Deploying other services..."
-docker compose --profile apps up -d
-
-# Wait for health checks
-echo "→ Waiting for services to be healthy..."
-start_time=$(date +%s)
-
+# --- 4. Wait for health ------------------------------------------------------
+echo "→ Waiting for healthy (timeout ${HEALTH_TIMEOUT}s)..."
+start=$(date +%s)
 while true; do
-    unhealthy=$(docker compose ps --format json | jq -r 'select(.Health != "" and .Health != "healthy") | .Service' 2>/dev/null || true)
+  total=$(docker compose --profile apps ps --format '{{.Name}}' | wc -l | tr -d ' ')
+  healthy=$(docker compose --profile apps ps --format '{{.Health}}' | grep -cx 'healthy' || true)
 
-    if [ -z "$unhealthy" ]; then
-        echo "✓ All services healthy"
-        break
-    fi
+  if [[ "$total" -gt 0 && "$healthy" -eq "$total" ]]; then
+    echo "✓ All ${healthy}/${total} containers healthy"
+    break
+  fi
 
-    elapsed=$(($(date +%s) - start_time))
-    if [ $elapsed -gt $HEALTH_TIMEOUT ]; then
-        echo "✗ Health check timeout after ${HEALTH_TIMEOUT}s"
-        echo "Unhealthy services:"
-        echo "$unhealthy"
-        echo
-        echo "Last $LOG_LINES lines of logs:"
-        echo "$unhealthy" | while read -r service; do
-            echo "--- $service ---"
-            docker compose logs --tail=$LOG_LINES "$service"
-        done
-        exit 1
-    fi
+  elapsed=$(( $(date +%s) - start ))
+  if (( elapsed > HEALTH_TIMEOUT )); then
+    echo "✗ Health check timeout after ${HEALTH_TIMEOUT}s (${healthy}/${total} healthy)" >&2
+    docker compose --profile apps ps >&2
+    echo "--- recent logs ---" >&2
+    docker compose --profile apps logs --tail="$LOG_LINES" >&2
+    exit 1
+  fi
 
-    echo "  Waiting for: $unhealthy (${elapsed}s elapsed)"
-    sleep 5
+  echo "  waiting: ${healthy}/${total} healthy (${elapsed}s)"
+  sleep 5
 done
 
-# Show status
+# --- 5. Status ---------------------------------------------------------------
 echo
-echo "=========================================="
-echo "Deployment complete"
-echo "=========================================="
-docker compose ps
-
+docker compose --profile apps ps
 echo
-echo "Service URLs:"
-echo "  API: https://ride-api.yourdomain.com/api/v1/"
-echo "  WebSocket: wss://ride-api.yourdomain.com/ws"
-echo
-echo "Useful commands:"
-echo "  Logs: docker compose logs -f <service-name>"
-echo "  Stats: docker stats"
-echo "  Status: docker compose ps"
+echo "API: http://localhost:8000/api/v1/health"
+echo "WS:  http://localhost:8001/api/v1/health"
+echo "Logs: docker compose logs -f <service>"

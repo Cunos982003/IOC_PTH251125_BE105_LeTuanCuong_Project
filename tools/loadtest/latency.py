@@ -31,7 +31,7 @@ class LatencyMeasurer:
                 self.connected = True
 
                 # Send auth
-                auth_msg = {"type": "auth", "token": self.customer_token}
+                auth_msg = {"t": "auth", "token": self.customer_token}
                 await ws.send(json.dumps(auth_msg))
 
                 # Collect samples
@@ -42,10 +42,11 @@ class LatencyMeasurer:
 
                     try:
                         data = json.loads(message)
-                        if data.get("type") == "driver_location" and "sent_at" in data:
+                        if data.get("t") == "driver_location" and "sent_at" in data:
                             now = time.time()
-                            sent_at = data["sent_at"]
-                            latency_ms = (now - sent_at) * 1000
+                            sent_at_ms = data["sent_at"]
+                            # sent_at is epoch milliseconds; convert to seconds for the delta.
+                            latency_ms = (now * 1000 - sent_at_ms)
                             self.latencies.append(latency_ms)
                     except (json.JSONDecodeError, KeyError):
                         continue
@@ -147,10 +148,11 @@ LIMITATIONS:
 2. Single customer measurement may not reflect all routing paths.
 """
     )
-    parser.add_argument("--url", default="ws://localhost:8001/ws", help="WebSocket URL")
+    parser.add_argument("--url", default="ws://localhost:8001/ws/customer", help="WebSocket URL")
     parser.add_argument("--duration", type=int, default=300, help="Duration in seconds (default: 300)")
     parser.add_argument("--load-test", action="store_true", help="Test with 100, 500, 1000 drivers")
     parser.add_argument("--output", default="latency_results.csv", help="Output CSV file")
+    parser.add_argument("--token", help="Customer JWT (role=CUSTOMER). If omitted, read the 'customer' key in tokens.json")
     args = parser.parse_args()
 
     # For simplicity, use driver 0's token as customer
@@ -160,14 +162,20 @@ LIMITATIONS:
         print(f"Error: {tokens_file} not found. Run prepare.py first.", file=sys.stderr)
         sys.exit(1)
 
-    with open(tokens_file) as f:
-        tokens_data = json.load(f)
-
-    if "0" not in tokens_data:
-        print("Error: Driver 0 not found in tokens.json", file=sys.stderr)
-        sys.exit(1)
-
-    customer_token = tokens_data["0"]["token"]
+    # Need a CUSTOMER token: /ws/customer rejects driver tokens (role mismatch).
+    if args.token:
+        customer_token = args.token
+    else:
+        with open(tokens_file) as f:
+            tokens_data = json.load(f)
+        cust = tokens_data.get("customer")
+        if not cust:
+            print(
+                "Error: no 'customer' entry in tokens.json. Register a CUSTOMER "
+                "(role=CUSTOMER) and store its token under the 'customer' key, or pass "
+                "--token <jwt>.", file=sys.stderr)
+            sys.exit(1)
+        customer_token = cust["token"]
 
     print("LATENCY MEASUREMENT")
     print("=" * 60)

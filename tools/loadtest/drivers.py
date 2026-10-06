@@ -52,10 +52,10 @@ class DriverSimulator:
         """Send location update with timestamp."""
         try:
             msg = {
-                "type": "location",
+                "t": "location",
                 "lat": self.lat,
                 "lng": self.lng,
-                "sent_at": time.time()
+                "sent_at": int(time.time() * 1000)  # epoch milliseconds (server stores long)
             }
             await ws.send(json.dumps(msg))
             self.messages_sent += 1
@@ -72,7 +72,7 @@ class DriverSimulator:
 
         try:
             response = {
-                "type": "accept_offer",
+                "t": "accept",
                 "tripId": offer_data.get("tripId")
             }
             await ws.send(json.dumps(response))
@@ -92,7 +92,7 @@ class DriverSimulator:
                     self.backoff = INITIAL_BACKOFF
 
                     # Send auth message
-                    auth_msg = {"type": "auth", "token": self.token}
+                    auth_msg = {"t": "auth", "token": self.token}
                     await ws.send(json.dumps(auth_msg))
                     self.messages_sent += 1
 
@@ -125,9 +125,9 @@ class DriverSimulator:
         async for message in ws:
             try:
                 data = json.loads(message)
-                msg_type = data.get("type")
+                msg_type = data.get("t")
 
-                if msg_type == "offer":
+                if msg_type == "TRIP_REQUEST":
                     asyncio.create_task(self.handle_offer(ws, data))
             except json.JSONDecodeError:
                 self.errors += 1
@@ -151,7 +151,7 @@ async def stats_reporter(drivers: list[DriverSimulator], interval: int = 10):
 async def main():
     parser = argparse.ArgumentParser(description="Simulate drivers sending location updates")
     parser.add_argument("--drivers", type=int, default=100, help="Number of drivers (default: 100)")
-    parser.add_argument("--url", default="ws://localhost:8001/ws", help="WebSocket URL")
+    parser.add_argument("--url", default="ws://localhost:8001/ws/driver", help="WebSocket URL")
     parser.add_argument("--duration", type=int, default=300, help="Duration in seconds (default: 300)")
     parser.add_argument("--reject-rate", type=float, default=0.2, help="Offer rejection rate (default: 0.2)")
     args = parser.parse_args()
