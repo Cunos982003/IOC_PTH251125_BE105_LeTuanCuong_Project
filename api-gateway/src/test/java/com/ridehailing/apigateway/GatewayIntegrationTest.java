@@ -430,10 +430,11 @@ class GatewayIntegrationTest {
     }
 
     @Test
-    void testHealthProbeIsOnlyPublicInsideContainer() throws Exception {
+    void testHealthIsPublicFromAnyAddress() throws Exception {
         mockMvc.perform(get("/api/v1/health")
                 .with(request -> { request.setRemoteAddr("192.0.2.50"); return request; }))
-            .andExpect(status().isUnauthorized());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("UP"));
         mockMvc.perform(get("/api/v1/health")
                 .with(request -> { request.setRemoteAddr("127.0.0.1"); return request; }))
             .andExpect(status().isOk())

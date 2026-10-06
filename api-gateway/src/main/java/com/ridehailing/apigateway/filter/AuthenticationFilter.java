@@ -56,10 +56,8 @@ public class AuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Compose probes originate inside this container, not through the public listener.
-        if ("GET".equals(method) && "/api/v1/health".equals(path)
-                && ("127.0.0.1".equals(request.getRemoteAddr()) || "::1".equals(request.getRemoteAddr())
-                    || "0:0:0:0:0:0:0:1".equals(request.getRemoteAddr()))) {
+        // Health probe luôn public để host/load-balancer kiểm tra liveness từ bên ngoài.
+        if ("GET".equals(method) && "/api/v1/health".equals(path)) {
             filterChain.doFilter(request, response);
             return;
         }

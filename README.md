@@ -16,8 +16,8 @@ docker compose --profile apps up -d
 Start-Sleep -Seconds 30
 
 # Test system
-curl http://localhost:8000/actuator/health  # API Gateway
-curl http://localhost:8001/actuator/health  # WS Gateway
+curl http://localhost:8000/api/v1/health  # API Gateway
+curl http://localhost:8001/api/v1/health  # WS Gateway
 
 # Run E2E tests
 .\tools\e2e\run-e2e.ps1
