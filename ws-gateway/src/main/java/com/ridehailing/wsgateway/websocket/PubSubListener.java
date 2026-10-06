@@ -1,4 +1,4 @@
-package com.ridehailing.wsgateway.routing;
+package com.ridehailing.wsgateway.websocket;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;

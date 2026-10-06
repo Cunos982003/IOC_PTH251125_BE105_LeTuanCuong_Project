@@ -114,7 +114,8 @@ public class RideWebSocketHandler extends TextWebSocketHandler {
             Map<String, Object> claims = jwtVerifier.verify(authMsg.getToken());
 
             String userId = (String) claims.get("sub");
-            String role = (String) claims.get("role");
+            String roleClaim = (String) claims.get("role");
+            String role = roleClaim == null ? null : roleClaim.toLowerCase(java.util.Locale.ROOT);
 
             if (userId == null || role == null) {
                 closeWithReason(wsSession, CloseStatus.POLICY_VIOLATION, "Invalid token claims");

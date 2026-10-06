@@ -1,130 +1,115 @@
 package com.ridehailing.e2e.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ridehailing.e2e.model.*;
-import org.apache.hc.client5.http.classic.methods.HttpGet;
-import org.apache.hc.client5.http.classic.methods.HttpPost;
-import org.apache.hc.client5.http.classic.methods.HttpPut;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.core5.http.ParseException;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.http.io.entity.StringEntity;
-
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.*;
+import java.time.Duration;
+import java.util.*;
 
-public class ApiGatewayClient {
+public class ApiGatewayClient implements AutoCloseable {
     private final String baseUrl;
-    private final CloseableHttpClient httpClient;
-    private final ObjectMapper objectMapper;
+    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    private final ObjectMapper mapper = new ObjectMapper();
 
-    public ApiGatewayClient(String baseUrl) {
-        this.baseUrl = baseUrl;
-        this.httpClient = HttpClients.createDefault();
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
+    public ApiGatewayClient(String baseUrl) { this.baseUrl = baseUrl.replaceAll("/$", ""); }
+
+    private HttpResponseInfo call(String method, String path, String token, Object body) throws IOException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(baseUrl + "/api/v1" + path))
+            .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json");
+        if (token != null) builder.header("Authorization", "Bearer " + token);
+        builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
+            : HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)));
+        try {
+            HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            return new HttpResponseInfo(response.statusCode(), response.body());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("HTTP request interrupted", e);
+        }
+    }
+
+    public <T> T decode(HttpResponseInfo response, Class<T> type) throws IOException {
+        if (response.status() < 200 || response.status() >= 300)
+            throw new HttpFailure(response.status(), response.body());
+        return mapper.readValue(response.body(), type);
     }
 
     public RegisterResponse register(RegisterRequest request) throws IOException {
-        HttpPost post = new HttpPost(baseUrl + "/api/v1/auth/register");
-        post.setHeader("Content-Type", "application/json");
-        post.setEntity(new StringEntity(objectMapper.writeValueAsString(request)));
-
-        try (CloseableHttpResponse response = httpClient.execute(post)) {
-            String body = EntityUtils.toString(response.getEntity());
-            if (response.getCode() >= 400) {
-                throw new IOException("Register failed: " + response.getCode() + " " + body);
-            }
-            return objectMapper.readValue(body, RegisterResponse.class);
-        } catch (ParseException e) {
-            throw new IOException("Failed to parse response", e);
-        }
+        return decode(call("POST", "/auth/register", null, request), RegisterResponse.class);
     }
-
     public LoginResponse login(LoginRequest request) throws IOException {
-        HttpPost post = new HttpPost(baseUrl + "/api/v1/auth/login");
-        post.setHeader("Content-Type", "application/json");
-        post.setEntity(new StringEntity(objectMapper.writeValueAsString(request)));
-
-        try (CloseableHttpResponse response = httpClient.execute(post)) {
-            String body = EntityUtils.toString(response.getEntity());
-            if (response.getCode() >= 400) {
-                throw new IOException("Login failed: " + response.getCode() + " " + body);
-            }
-            return objectMapper.readValue(body, LoginResponse.class);
-        } catch (ParseException e) {
-            throw new IOException("Failed to parse response", e);
-        }
+        return decode(call("POST", "/auth/login", null, request), LoginResponse.class);
     }
-
+    public String registerAccount(String role) throws IOException {
+        String token = register(new RegisterRequest("e2e-" + UUID.randomUUID() + "@test.com",
+            "password123", "E2E " + role, "+849" + String.format("%08d", new Random().nextInt(100_000_000)), role)).accessToken();
+        if (token == null || token.isBlank()) throw new IOException("Registration omitted accessToken");
+        return token;
+    }
+    // Decode only the issued payload to identify test accounts; never modify or re-sign a token.
+    public long userId(String token) throws IOException {
+        try {
+            return Long.parseLong(mapper.readTree(Base64.getUrlDecoder().decode(token.split("\\.")[1])).path("sub").asText());
+        } catch (RuntimeException e) { throw new IOException("Invalid JWT subject", e); }
+    }
     public WalletResponse getWallet(String token) throws IOException {
-        HttpGet get = new HttpGet(baseUrl + "/api/v1/wallet");
-        get.setHeader("Authorization", "Bearer " + token);
-
-        try (CloseableHttpResponse response = httpClient.execute(get)) {
-            String body = EntityUtils.toString(response.getEntity());
-            if (response.getCode() >= 400) {
-                throw new IOException("Get wallet failed: " + response.getCode() + " " + body);
+        return decode(call("GET", "/wallet", token, null), WalletResponse.class);
+    }
+    public WalletResponse awaitBalance(String token, long expected, long timeoutMs) throws Exception {
+        long deadline = System.nanoTime() + timeoutMs * 1_000_000;
+        Long actual = null;
+        do {
+            try {
+                WalletResponse wallet = getWallet(token);
+                actual = wallet.balance();
+                if (actual != null && actual == expected) return wallet;
+            } catch (HttpFailure e) {
+                if (e.status != 404 || !"WALLET_NOT_FOUND".equals(errorCode(e.body))) throw e;
             }
-            return objectMapper.readValue(body, WalletResponse.class);
-        } catch (ParseException e) {
-            throw new IOException("Failed to parse response", e);
-        }
+            Thread.sleep(200);
+        } while (System.nanoTime() < deadline);
+        throw new IOException("Wallet balance timeout: expected " + expected + ", got " + actual);
     }
-
-    public TripResponse requestTrip(String token, TripRequest request, String idempotencyKey) throws IOException {
-        HttpPost post = new HttpPost(baseUrl + "/api/v1/trips");
-        post.setHeader("Content-Type", "application/json");
-        post.setHeader("Authorization", "Bearer " + token);
-        post.setHeader("Idempotency-Key", idempotencyKey);
-        post.setEntity(new StringEntity(objectMapper.writeValueAsString(request)));
-
-        try (CloseableHttpResponse response = httpClient.execute(post)) {
-            String body = EntityUtils.toString(response.getEntity());
-            if (response.getCode() >= 400) {
-                ErrorResponse error = objectMapper.readValue(body, ErrorResponse.class);
-                throw new IOException("Request trip failed: " + response.getCode() + " " + error.code() + " " + error.message());
-            }
-            return objectMapper.readValue(body, TripResponse.class);
-        } catch (ParseException e) {
-            throw new IOException("Failed to parse response", e);
-        }
+    public String errorCode(String body) throws IOException { return mapper.readTree(body).path("code").asText(); }
+    public TripResponse requestTrip(String token, TripRequest request, String key) throws IOException {
+        return decode(requestTripRaw(token, request, key), TripResponse.class);
     }
-
-    public HttpResponseInfo requestTripRaw(String token, TripRequest request, String idempotencyKey) throws IOException {
-        HttpPost post = new HttpPost(baseUrl + "/api/v1/trips");
-        post.setHeader("Content-Type", "application/json");
-        post.setHeader("Authorization", "Bearer " + token);
-        post.setHeader("Idempotency-Key", idempotencyKey);
-        post.setEntity(new StringEntity(objectMapper.writeValueAsString(request)));
-
-        try (CloseableHttpResponse response = httpClient.execute(post)) {
-            String body = EntityUtils.toString(response.getEntity());
-            return new HttpResponseInfo(response.getCode(), body);
-        } catch (ParseException e) {
-            throw new IOException("Failed to parse response", e);
-        }
+    public HttpResponseInfo requestTripRaw(String token, TripRequest request, String key) throws IOException {
+        return call("POST", "/rides", token, new TripRequest(request.pickupLat(), request.pickupLng(),
+            request.dropoffLat(), request.dropoffLng(), key));
     }
-
-    public void cancelTrip(String token, Long tripId) throws IOException {
-        HttpPut put = new HttpPut(baseUrl + "/api/v1/trips/" + tripId + "/cancel");
-        put.setHeader("Authorization", "Bearer " + token);
-
-        try (CloseableHttpResponse response = httpClient.execute(put)) {
-            if (response.getCode() >= 400) {
-                String body = EntityUtils.toString(response.getEntity());
-                throw new IOException("Cancel trip failed: " + response.getCode() + " " + body);
-            }
-        } catch (ParseException e) {
-            throw new IOException("Failed to parse response", e);
-        }
+    public TripResponse getTrip(String token, UUID id) throws IOException {
+        return decode(call("GET", "/rides/" + id, token, null), TripResponse.class);
     }
-
-    public void close() throws IOException {
-        httpClient.close();
+    public TripResponse awaitStatus(String token, UUID id, String status, long timeoutMs) throws Exception {
+        long deadline = System.nanoTime() + timeoutMs * 1_000_000;
+        String actual;
+        do {
+            TripResponse trip = getTrip(token, id);
+            actual = trip.status();
+            if (status.equals(actual)) return trip;
+            if (Set.of("COMPLETED", "CANCELLED", "NO_DRIVER_FOUND").contains(actual))
+                throw new IOException("Expected " + status + " but trip became " + actual);
+            Thread.sleep(100);
+        } while (System.nanoTime() < deadline);
+        throw new IOException("Trip status timeout: expected " + status + ", got " + actual);
     }
-
+    public void action(String token, UUID id, String action) throws IOException {
+        requireSuccess(call("POST", "/trips/" + id + "/" + action, token, null));
+    }
+    public void cancelTrip(String token, UUID id) throws IOException {
+        requireSuccess(call("POST", "/rides/" + id + "/cancel", token, null));
+    }
+    private void requireSuccess(HttpResponseInfo response) throws IOException {
+        if (response.status() < 200 || response.status() >= 300) throw new HttpFailure(response.status(), response.body());
+    }
+    public void close() { client.close(); }
     public record HttpResponseInfo(int status, String body) {}
+    public static class HttpFailure extends IOException {
+        public final int status;
+        public final String body;
+        public HttpFailure(int status, String body) { super("HTTP " + status + " " + body); this.status = status; this.body = body; }
+    }
 }

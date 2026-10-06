@@ -10,7 +10,7 @@ import java.util.List;
 public class ScenarioRunner {
     public static void main(String[] args) {
         String apiGatewayUrl = System.getenv().getOrDefault("API_GATEWAY_URL", "http://localhost:8000");
-        String wsGatewayUrl = System.getenv().getOrDefault("WS_GATEWAY_URL", "ws://localhost:8001/ws");
+        String wsGatewayUrl = System.getenv().getOrDefault("WS_GATEWAY_URL", "ws://localhost:8001/ws/driver");
         String redisHost = System.getenv().getOrDefault("REDIS_HOST", "localhost");
         String redisPassword = System.getenv().getOrDefault("REDIS_PASSWORD", "");
 
@@ -24,7 +24,8 @@ public class ScenarioRunner {
         System.out.println();
 
         ApiGatewayClient apiClient = new ApiGatewayClient(apiGatewayUrl);
-        RedisTestClient redisClient = new RedisTestClient(redisHost, redisPassword);
+        RedisTestClient redisClient = new RedisTestClient(redisHost,
+            Integer.parseInt(System.getenv().getOrDefault("REDIS_PORT", "6379")), redisPassword);
 
         List<ScenarioResult> results = new ArrayList<>();
 
@@ -61,7 +62,7 @@ public class ScenarioRunner {
         int failed = 0;
 
         for (ScenarioResult result : results) {
-            String status = result.passed() ? "✓ PASSED" : "✗ FAILED";
+            String status = result.passed() ? "PASSED" : "FAILED";
             System.out.printf("%-30s %-15s %-15d %s%n",
                 result.name(),
                 status,

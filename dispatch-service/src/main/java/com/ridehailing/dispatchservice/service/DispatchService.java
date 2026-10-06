@@ -112,8 +112,15 @@ public class DispatchService {
             System.err.println("Failed to notify customer: " + e.getMessage());
         }
 
-        // Start matching loop asynchronously
-        matchingService.startMatching(tripId);
+        // Matching must not read the trip before its transaction commits.
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+            new org.springframework.transaction.support.TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    matchingService.startMatching(tripId);
+                }
+            }
+        );
 
         return matching;
     }

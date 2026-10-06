@@ -24,6 +24,10 @@ class LocationServiceClientContractTest {
                 new LocationServiceClient.LocationDto("67890", 10.7769, 106.7009,
                         java.time.Instant.parse("2026-10-04T10:30:00Z").toEpochMilli()))))
                 .doesNotThrowAnyException();
+
+        wiremock.verify(postRequestedFor(urlEqualTo("/internal/locations"))
+                .withHeader("X-Internal-Key", equalTo("test-key"))
+                .withRequestBody(equalToJson(fixture("location-post-locations"))));
     }
 
     private String fixture(String name) throws Exception {

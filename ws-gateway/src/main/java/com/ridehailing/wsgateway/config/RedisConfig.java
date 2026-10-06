@@ -1,6 +1,6 @@
 package com.ridehailing.wsgateway.config;
 
-import com.ridehailing.wsgateway.routing.PubSubListener;
+import com.ridehailing.wsgateway.websocket.PubSubListener;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

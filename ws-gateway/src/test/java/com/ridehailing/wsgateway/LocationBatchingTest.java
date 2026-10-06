@@ -79,8 +79,8 @@ class LocationBatchingTest {
         CountDownLatch openLatch = new CountDownLatch(50);
 
         for (int i = 0; i < 50; i++) {
-            String driverId = "driver" + i;
-            String token = createToken(driverId, "driver");
+            String driverId = Integer.toString(i + 1);
+            String token = createToken(driverId, "DRIVER");
 
             TestWebSocketClient client = new TestWebSocketClient(
                     new URI("ws://localhost:" + port + "/ws/driver"),
@@ -122,7 +122,7 @@ class LocationBatchingTest {
         stubFor(post(urlEqualTo("/internal/locations"))
                 .willReturn(aResponse().withStatus(200)));
 
-        String token = createToken("realDriver123", "driver");
+        String token = createToken("123", "DRIVER");
 
         TestWebSocketClient client = new TestWebSocketClient(
                 new URI("ws://localhost:" + port + "/ws/driver"),
@@ -147,13 +147,13 @@ class LocationBatchingTest {
         assertThat(requests.size()).isGreaterThan(0);
 
         for (var req : requests) {
-            String body = req.getBodyAsString();
-            Map<String, Object> parsed = objectMapper.readValue(body, Map.class);
-            List<Map<String, Object>> locations = (List<Map<String, Object>>) parsed.get("locations");
+            var locations = objectMapper.readTree(req.getBodyAsString());
+            assertThat(locations.isArray()).isTrue();
+            assertThat(locations.size()).isGreaterThan(0);
 
-            for (Map<String, Object> loc : locations) {
-                assertThat(loc.get("driverId")).isEqualTo("realDriver123");
-                assertThat(loc.get("driverId")).isNotEqualTo("fakeDriver999");
+            for (var loc : locations) {
+                assertThat(loc.path("driverId").asLong()).isEqualTo(123L);
+                assertThat(loc.path("driverId").isIntegralNumber()).isTrue();
             }
         }
 

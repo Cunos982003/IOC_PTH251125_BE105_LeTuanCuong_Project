@@ -1,10 +1,6 @@
 package com.ridehailing.e2e.model;
-
-import com.fasterxml.jackson.annotation.JsonProperty;
-
-public record TripRequest(
-    @JsonProperty("pickupLat") double pickupLat,
-    @JsonProperty("pickupLng") double pickupLng,
-    @JsonProperty("dropoffLat") double dropoffLat,
-    @JsonProperty("dropoffLng") double dropoffLng
-) {}
+public record TripRequest(double pickupLat, double pickupLng, double dropoffLat, double dropoffLng, String idempotencyKey) {
+    public TripRequest(double pickupLat, double pickupLng, double dropoffLat, double dropoffLng) {
+        this(pickupLat, pickupLng, dropoffLat, dropoffLng, null);
+    }
+}

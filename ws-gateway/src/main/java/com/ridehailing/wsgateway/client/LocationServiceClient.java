@@ -33,7 +33,11 @@ public class LocationServiceClient {
     public void batchUpdate(List<LocationDto> locations) {
         try {
             String json = new com.fasterxml.jackson.databind.ObjectMapper()
-                    .writeValueAsString(new BatchRequest(locations));
+                    .writeValueAsString(locations.stream().map(location -> java.util.Map.of(
+                            "driverId", Long.parseLong(location.driverId()),
+                            "lat", location.lat(), "lng", location.lng(),
+                            "sentAt", java.time.Instant.ofEpochMilli(location.sentAt()).toString()
+                    )).toList());
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/internal/locations"))
@@ -62,7 +66,4 @@ public class LocationServiceClient {
     ) {
     }
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record BatchRequest(@JsonProperty("locations") List<LocationDto> locations) {
-    }
 }

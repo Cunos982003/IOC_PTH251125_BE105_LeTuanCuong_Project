@@ -1,11 +1,5 @@
 package com.ridehailing.e2e.model;
-
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
-
+import java.util.UUID;
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record TripResponse(
-    @JsonProperty("tripId") Long tripId,
-    @JsonProperty("status") String status,
-    @JsonProperty("fare") Long fare
-) {}
+public record TripResponse(UUID tripId, String status, Long fare) {}

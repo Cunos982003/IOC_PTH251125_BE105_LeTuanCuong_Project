@@ -208,6 +208,7 @@ services:
       LOCATION_SERVICE_URL: http://location-service:8082
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
+      USER_SERVICE_URL: http://user-service:8081
       WS_GATEWAY_URL: http://ws-gateway:8001
     mem_limit: 512m
     depends_on:

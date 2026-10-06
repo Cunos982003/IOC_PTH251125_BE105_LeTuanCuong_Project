@@ -86,7 +86,7 @@ class WebSocketAuthTest {
 
     @Test
     void shouldCloseConnectionOnRoleMismatch() throws Exception {
-        String token = createToken("driver123", "driver");
+        String token = createToken("driver123", "DRIVER");
 
         CountDownLatch closeLatch = new CountDownLatch(1);
         List<String> closeReasons = new ArrayList<>();
@@ -104,16 +104,17 @@ class WebSocketAuthTest {
         assertThat(closeReasons.get(0)).contains("Role mismatch");
     }
 
-    @Test
-    void shouldAcceptValidAuth() throws Exception {
-        String token = createToken("driver123", "driver");
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"DRIVER", "CUSTOMER"})
+    void shouldAcceptValidAuth(String role) throws Exception {
+        String token = createToken("driver123", role);
 
         CountDownLatch openLatch = new CountDownLatch(1);
         CountDownLatch closeLatch = new CountDownLatch(1);
         List<String> closeReasons = new ArrayList<>();
 
         TestWebSocketClient client = new TestWebSocketClient(
-                new URI("ws://localhost:" + port + "/ws/driver"),
+                new URI("ws://localhost:" + port + "/ws/" + role.toLowerCase(Locale.ROOT)),
                 closeLatch, closeReasons);
         client.setOpenLatch(openLatch);
 
@@ -130,7 +131,7 @@ class WebSocketAuthTest {
 
     @Test
     void shouldRejectOversizedMessage() throws Exception {
-        String token = createToken("driver123", "driver");
+        String token = createToken("driver123", "DRIVER");
 
         CountDownLatch openLatch = new CountDownLatch(1);
         CountDownLatch closeLatch = new CountDownLatch(1);
@@ -165,7 +166,7 @@ class WebSocketAuthTest {
 
     @Test
     void shouldEnforceRateLimit() throws Exception {
-        String token = createToken("driver123", "driver");
+        String token = createToken("driver123", "DRIVER");
 
         CountDownLatch openLatch = new CountDownLatch(1);
         CountDownLatch messageLatch = new CountDownLatch(1);
