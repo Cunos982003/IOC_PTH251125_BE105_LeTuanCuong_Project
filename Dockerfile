@@ -20,10 +20,6 @@ COPY api-gateway/pom.xml api-gateway/
 COPY ${MODULE}/src ${MODULE}/src
 
 # Build the specific module (no -am since no shared modules)
-# Maven will download dependencies as needed; skipping dependency:go-offline avoids slow resolution
-RUN mvn -q -pl ${MODULE} package -DskipTests
-
-# Build the specific module (no -am since no shared modules)
 RUN mvn -q -pl ${MODULE} package -DskipTests
 
 # Runtime stage
