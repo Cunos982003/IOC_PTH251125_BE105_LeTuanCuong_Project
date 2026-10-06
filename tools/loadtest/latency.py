@@ -24,23 +24,24 @@ class LatencyMeasurer:
     async def run(self, duration: int):
         """Connect and collect latency samples for duration seconds."""
         try:
-            async with websockets.connect(
-                self.ws_url,
-                extra_headers={"Authorization": f"Bearer {self.customer_token}"}
-            ) as ws:
+            async with websockets.connect(self.ws_url) as ws:
                 self.connected = True
 
                 # Send auth
                 auth_msg = {"t": "auth", "token": self.customer_token}
                 await ws.send(json.dumps(auth_msg))
 
-                # Collect samples
+                # Collect samples with timeout
                 end_time = time.time() + duration
-                async for message in ws:
-                    if time.time() >= end_time:
-                        break
-
+                while time.time() < end_time:
                     try:
+                        remaining = end_time - time.time()
+                        if remaining <= 0:
+                            break
+
+                        # Wait for message with timeout
+                        message = await asyncio.wait_for(ws.recv(), timeout=min(remaining, 5.0))
+
                         data = json.loads(message)
                         if data.get("t") == "driver_location" and "sent_at" in data:
                             now = time.time()
@@ -48,6 +49,9 @@ class LatencyMeasurer:
                             # sent_at is epoch milliseconds; convert to seconds for the delta.
                             latency_ms = (now * 1000 - sent_at_ms)
                             self.latencies.append(latency_ms)
+                    except asyncio.TimeoutError:
+                        # No message received, continue waiting
+                        continue
                     except (json.JSONDecodeError, KeyError):
                         continue
         except Exception as e:

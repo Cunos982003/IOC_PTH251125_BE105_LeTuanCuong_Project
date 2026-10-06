@@ -24,11 +24,14 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/ws/**", "/api/v1/health").permitAll()
+                        .requestMatchers("/ws/**", "/api/v1/health", "/error").permitAll()
                         .requestMatchers("/internal/**").permitAll()
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(internalKeyFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(internalKeyFilter, UsernamePasswordAuthenticationFilter.class)
+                // WebSocket không cần HTTP Basic Authentication
+                .httpBasic(basic -> basic.disable())
+                .formLogin(form -> form.disable());
 
         return http.build();
     }

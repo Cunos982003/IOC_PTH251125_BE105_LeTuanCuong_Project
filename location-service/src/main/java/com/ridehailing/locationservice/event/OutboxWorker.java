@@ -42,24 +42,21 @@ public class OutboxWorker {
 
         for (OutboxRecord record : records) {
             try {
-                String payloadJson = objectMapper.writeValueAsString(record.payload());
                 Record<String, Object> streamRecord = StreamRecords.newRecord()
                         .in(record.stream())
-                        .ofObject(payloadJson);
+                        .ofObject(record.payload());
 
                 redisTemplate.opsForStream().add(streamRecord);
 
                 jdbcClient.sql("UPDATE outbox SET sent_at = now() WHERE id = ?")
                         .param(record.id())
                         .update();
-            } catch (JsonProcessingException e) {
-                System.err.println("Failed to serialize outbox record " + record.id() + ": " + e.getMessage());
             } catch (Exception e) {
                 System.err.println("Failed to publish outbox record " + record.id() + ": " + e.getMessage());
             }
         }
     }
 
-    private record OutboxRecord(Long id, String stream, Object payload) {
+    private record OutboxRecord(Long id, String stream, String payload) {
     }
 }

@@ -84,10 +84,7 @@ class DriverSimulator:
         """Main driver loop with reconnection."""
         while True:
             try:
-                async with websockets.connect(
-                    self.ws_url,
-                    extra_headers={"Authorization": f"Bearer {self.token}"}
-                ) as ws:
+                async with websockets.connect(self.ws_url) as ws:
                     self.connected = True
                     self.backoff = INITIAL_BACKOFF
 
@@ -105,6 +102,10 @@ class DriverSimulator:
             except (ConnectionClosed, OSError, Exception) as e:
                 self.connected = False
                 self.errors += 1
+
+                # Debug: print first few errors
+                if self.errors <= 3:
+                    print(f"[Driver {self.driver_id}] Error: {type(e).__name__}: {e}", file=sys.stderr)
 
                 # Exponential backoff with jitter
                 jitter = random.uniform(-JITTER_FACTOR, JITTER_FACTOR) * self.backoff
