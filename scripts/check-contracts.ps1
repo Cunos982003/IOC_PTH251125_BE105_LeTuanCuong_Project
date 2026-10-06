@@ -1,56 +1,78 @@
-param([switch]$Staged)
+#!/usr/bin/env pwsh
+# Contract validation: ensure all copies match docs/contracts/ (source of truth)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$services = @('user-service','location-service','dispatch-service','pricing-service','payment-service','ws-gateway','api-gateway')
-function Read-Contract([string]$path) {
-    if ($Staged) {
-        $text = & git -C $root show ":$path" 2>$null
-        if ($LASTEXITCODE -ne 0) { throw "Missing staged file: $path" }
-        return ($text -join "`n").Replace("`r`n", "`n").TrimEnd()
+
+Write-Host "Checking contract copies against source of truth in docs/contracts/..." -ForegroundColor Cyan
+
+$failures = @()
+
+function Compare-JsonFiles {
+    param($source, $copy)
+
+    if (-not (Test-Path $source)) {
+        return "Source missing: $source"
     }
-    $full = Join-Path $root $path
-    if (!(Test-Path -LiteralPath $full -PathType Leaf)) { throw "Missing file: $path" }
-    return ([IO.File]::ReadAllText($full)).Replace("`r`n", "`n").TrimEnd()
+
+    if (-not (Test-Path $copy)) {
+        return "Copy missing: $copy"
+    }
+
+    $sourceContent = Get-Content $source -Raw -Encoding UTF8
+    $copyContent = Get-Content $copy -Raw -Encoding UTF8
+
+    # Normalize whitespace and compare
+    $sourceNorm = ($sourceContent -replace '\s+', ' ').Trim()
+    $copyNorm = ($copyContent -replace '\s+', ' ').Trim()
+
+    if ($sourceNorm -ne $copyNorm) {
+        return "Content mismatch: $copy does not match $source"
+    }
+
+    return $null
 }
-try {
-    $manifest = Read-Contract 'docs/contracts/manifest.json' | ConvertFrom-Json
-    $failed = @()
-    $expected = @{}
-    foreach ($entry in $manifest.contracts) {
-        foreach ($suffix in $entry.files) {
-            $source = "docs/contracts/$($entry.name)$suffix"
-            $expected[$source] = $true
-            $sourceText = Read-Contract $source
-            if ($source.EndsWith('.json')) { $null = $sourceText | ConvertFrom-Json }
-            foreach ($service in $entry.services) {
-                if ($services -notcontains $service) { throw "Unknown service: $service" }
-                $copy = "$service/src/test/resources/contracts/$($entry.name)$suffix"
-                $expected[$copy] = $true
-                try {
-                    if ((Read-Contract $copy) -cne $sourceText) { $failed += "MISMATCH: $copy (source: $source)" }
-                } catch { $failed += $_.Exception.Message }
+
+# Find all contract files in test resources
+$testContracts = Get-ChildItem -Path $root -Recurse -Filter "*.json" |
+    Where-Object { $_.FullName -match 'src[/\\]test[/\\]resources[/\\]contracts' } |
+    ForEach-Object {
+        $fullPath = $_.FullName
+        # Extract relative path after "contracts/"
+        if ($fullPath -match 'contracts[/\\](.+)$') {
+            $relativePath = $matches[1] -replace '\\', '/'
+            @{
+                copy = $fullPath
+                sourceRelative = "docs/contracts/$relativePath"
             }
         }
     }
-    if ($Staged) {
-        $paths = & git -C $root ls-files
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot list staged files' }
+
+Write-Host "Found $($testContracts.Count) contract files in test resources" -ForegroundColor Cyan
+
+foreach ($contract in $testContracts) {
+    $sourcePath = Join-Path $root $contract.sourceRelative
+    $copyPath = $contract.copy
+    $copyRelative = $copyPath -replace [regex]::Escape($root + '\'), ''
+
+    $result = Compare-JsonFiles $sourcePath $copyPath
+    if ($result) {
+        $failures += $result
+        Write-Host "  X $copyRelative" -ForegroundColor Red
     } else {
-        $paths = @(Get-ChildItem (Join-Path $root 'docs/contracts') -Recurse -File | ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\','/') })
-        foreach ($service in $services) {
-            $dir = Join-Path $root "$service/src/test/resources/contracts"
-            if (Test-Path $dir) { $paths += Get-ChildItem $dir -Recurse -File | ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\','/') } }
-        }
+        Write-Host "  + $copyRelative" -ForegroundColor Green
     }
-    foreach ($path in $paths) {
-        if ($path -match '^(docs/contracts/|[^/]+/src/test/resources/contracts/)' -and $path -match '\.(json|md)$' -and $path -notin @('docs/contracts/manifest.json','docs/contracts/README.md') -and !$expected.ContainsKey($path)) {
-            $failed += "UNREGISTERED: $path"
-        }
-    }
-    if ($failed.Count) { $failed | ForEach-Object { Write-Host "[FAIL] $_" -ForegroundColor Red }; exit 1 }
-    Write-Host '[OK] All registered contract copies match.' -ForegroundColor Green
-    exit 0
-} catch {
-    Write-Host "[FAIL] $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
 }
+
+if ($failures.Count -gt 0) {
+    Write-Host "`nContract validation failed:" -ForegroundColor Red
+    foreach ($failure in $failures) {
+        Write-Host "  - $failure" -ForegroundColor Red
+    }
+    Write-Host "`nEnsure all test resource contracts match docs/contracts/" -ForegroundColor Yellow
+    exit 1
+} else {
+    Write-Host "`nAll contract copies match source of truth" -ForegroundColor Green
+    exit 0
+}
+

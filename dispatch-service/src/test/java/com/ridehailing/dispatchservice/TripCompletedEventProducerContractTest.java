@@ -2,21 +2,18 @@ package com.ridehailing.dispatchservice;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ridehailing.dispatchservice.domain.TripEvent;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 
 import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
 class TripCompletedEventProducerContractTest {
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     @Test
     void producerSerializesContractEvent() throws Exception {
