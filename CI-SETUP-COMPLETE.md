@@ -166,6 +166,11 @@ jobs:
 
 ## Troubleshooting
 
+### Invalid tag error (repository name must be lowercase)
+✓ **Fixed**: Workflow tự động convert `github.repository_owner` sang lowercase
+- Step "Prepare image tags" convert owner name
+- Tags sử dụng `${{ steps.meta.outputs.tag }}` thay vì trực tiếp `repository_owner`
+
 ### Pipeline không chạy
 - Check branch name: phải là main/master/develop
 - Workflow file phải ở `.github/workflows/ci.yml`
