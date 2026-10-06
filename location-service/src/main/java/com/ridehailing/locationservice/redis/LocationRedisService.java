@@ -49,6 +49,7 @@ public class LocationRedisService {
     private final DefaultRedisScript<Long> markFreeScript;
     private final DefaultRedisScript<Long> deleteDriverScript;
     private final DefaultRedisScript<List<Object>> geosearchNearbyScript;
+    private final DefaultRedisScript<List<Object>> geosearchCountScript;
 
     public LocationRedisService(StringRedisTemplate stringRedisTemplate,
                                 @org.springframework.beans.factory.annotation.Qualifier("clockProvider") ClockProvider clockProvider,
@@ -66,6 +67,7 @@ public class LocationRedisService {
         this.markFreeScript = createScript("scripts/mark_free.lua");
         this.deleteDriverScript = createScript("scripts/delete_driver.lua");
         this.geosearchNearbyScript = createListScript("scripts/geosearch_nearby.lua");
+        this.geosearchCountScript = createListScript("scripts/geosearch_count.lua");
     }
 
     private DefaultRedisScript<Long> createScript(String resourcePath) {
@@ -249,23 +251,21 @@ public class LocationRedisService {
         long now = clockProvider.epochMilli();
         long staleThreshold = now - STALE_THRESHOLD_MS;
 
-        List<Object> results = stringRedisTemplate.execute(geosearchNearbyScript,
+        // Use geosearchCountScript to get all driver IDs without COUNT limit
+        List<Object> allDriverIds = stringRedisTemplate.execute(geosearchCountScript,
                 List.of(KEY_GEO),
                 String.valueOf(lng),
                 String.valueOf(lat),
-                String.valueOf(radiusKm),
-                "1000"); // Large count for counting
+                String.valueOf(radiusKm));
 
-        if (results == null) {
+        if (allDriverIds == null || allDriverIds.isEmpty()) {
             return 0;
         }
 
+        // Filter by stale threshold
         long count = 0;
-        // Results are flat array: [driverId1, distanceM1, driverId2, distanceM2, ...]
-        for (int i = 0; i < results.size(); i += 2) {
-            if (i + 1 >= results.size()) break;
-
-            String driverIdStr = results.get(i).toString();
+        for (Object driverIdObj : allDriverIds) {
+            String driverIdStr = driverIdObj.toString();
             Double lastSeenScore = stringRedisTemplate.opsForZSet().score(KEY_LASTSEEN, driverIdStr);
             if (lastSeenScore != null && lastSeenScore.longValue() >= staleThreshold) {
                 count++;

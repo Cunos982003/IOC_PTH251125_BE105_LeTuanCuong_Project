@@ -1,261 +1,208 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
-import argparse
+"""
+Measure WebSocket latency by receiving driver_location messages.
+Assumes one customer has an active trip with driver 0.
+"""
 import asyncio
-import base64
-import csv
 import json
-import os
-import statistics
+import sys
 import time
+import csv
+import argparse
 from pathlib import Path
-from typing import Any
-
-import httpx
+import statistics
 import websockets
 
 
-LOAD_LEVELS_DEFAULT = [100, 500, 1000]
+class LatencyMeasurer:
+    def __init__(self, customer_token: str, ws_url: str):
+        self.customer_token = customer_token
+        self.ws_url = ws_url
+        self.latencies = []
+        self.connected = False
+
+    async def run(self, duration: int):
+        """Connect and collect latency samples for duration seconds."""
+        try:
+            async with websockets.connect(
+                self.ws_url,
+                extra_headers={"Authorization": f"Bearer {self.customer_token}"}
+            ) as ws:
+                self.connected = True
+
+                # Send auth
+                auth_msg = {"type": "auth", "token": self.customer_token}
+                await ws.send(json.dumps(auth_msg))
+
+                # Collect samples
+                end_time = time.time() + duration
+                async for message in ws:
+                    if time.time() >= end_time:
+                        break
+
+                    try:
+                        data = json.loads(message)
+                        if data.get("type") == "driver_location" and "sent_at" in data:
+                            now = time.time()
+                            sent_at = data["sent_at"]
+                            latency_ms = (now - sent_at) * 1000
+                            self.latencies.append(latency_ms)
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except Exception as e:
+            print(f"Connection error: {e}", file=sys.stderr)
+            self.connected = False
+
+    def get_stats(self) -> dict:
+        """Calculate latency percentiles."""
+        if not self.latencies:
+            return {"count": 0, "p50": 0, "p95": 0, "p99": 0, "max": 0}
+
+        sorted_lat = sorted(self.latencies)
+        count = len(sorted_lat)
+
+        return {
+            "count": count,
+            "p50": statistics.quantiles(sorted_lat, n=100)[49] if count >= 2 else sorted_lat[0],
+            "p95": statistics.quantiles(sorted_lat, n=100)[94] if count >= 2 else sorted_lat[0],
+            "p99": statistics.quantiles(sorted_lat, n=100)[98] if count >= 2 else sorted_lat[0],
+            "max": max(sorted_lat)
+        }
 
 
-from urllib.parse import urlparse
+async def measure_single(customer_token: str, ws_url: str, duration: int) -> dict:
+    """Run single measurement."""
+    measurer = LatencyMeasurer(customer_token, ws_url)
+    await measurer.run(duration)
+    return measurer.get_stats()
 
 
-def normalize_http_url(raw_url: str) -> str:
-    if raw_url.startswith("ws://"):
-        parsed = urlparse(raw_url)
-        return f"http://{parsed.netloc}"
-    if raw_url.startswith("wss://"):
-        parsed = urlparse(raw_url)
-        return f"https://{parsed.netloc}"
-    parsed = urlparse(raw_url)
-    if parsed.scheme:
-        return f"{parsed.scheme}://{parsed.netloc}"
-    return raw_url.rstrip("/")
-
-
-def normalize_ws_url(raw_url: str) -> str:
-    if raw_url.startswith("http://"):
-        return "ws://" + raw_url[len("http://") :]
-    if raw_url.startswith("https://"):
-        return "wss://" + raw_url[len("https://") :]
-    if raw_url.startswith("ws://") or raw_url.startswith("wss://"):
-        return raw_url
-    return "ws://" + raw_url
-
-
-def load_tokens(tokens_path: Path) -> list[dict[str, Any]]:
-    if not tokens_path.exists():
-        raise FileNotFoundError(f"Missing tokens file: {tokens_path}. Run prepare.py first.")
-    data = json.loads(tokens_path.read_text(encoding="utf-8"))
-    drivers = data.get("drivers") or []
-    if not drivers:
-        raise ValueError(f"No drivers in {tokens_path}")
-    return drivers
-
-
-def decode_jwt_subject(token: str) -> str:
-    try:
-        payload_segment = token.split(".", 2)[1]
-        padded = payload_segment + "=" * (-len(payload_segment) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
-        return str(payload.get("sub") or payload.get("userId") or payload.get("uid") or "unknown")
-    except Exception:
-        return "unknown"
-
-
-async def register_or_login(client: httpx.AsyncClient, base_url: str, email: str, password: str, role: str) -> str:
-    register_url = f"{base_url}/api/v1/auth/register"
-    login_url = f"{base_url}/api/v1/auth/login"
-    registration = {"email": email, "password": password, "fullName": email.split("@", 1)[0].replace(".", " ").title(), "role": role}
-    response = await client.post(register_url, json=registration, timeout=15.0)
-    if response.status_code == 200:
-        data = response.json()
-        token = str(data.get("accessToken") or data.get("token") or "")
-        if token:
-            return token
-        raise RuntimeError(f"Register response missing token for {email}: {response.text}")
-    if response.status_code == 409:
-        login_response = await client.post(login_url, json={"email": email, "password": password}, timeout=15.0)
-        if login_response.status_code != 200:
-            raise RuntimeError(f"Login failed for {email}: {login_response.status_code}: {login_response.text}")
-        data = login_response.json()
-        token = str(data.get("accessToken") or data.get("token") or "")
-        if token:
-            return token
-        raise RuntimeError(f"Login response missing token for {email}: {login_response.text}")
-    raise RuntimeError(f"Register failed for {email}: {response.status_code}: {response.text}")
-
-
-async def ensure_customer_token(api_base_url: str, email: str, password: str) -> tuple[str, str]:
-    async with httpx.AsyncClient() as client:
-        token = await register_or_login(client, api_base_url, email, password, "CUSTOMER")
-    return token, decode_jwt_subject(token)
-
-
-async def set_route(ws_gateway_url: str, internal_key: str, driver_id: int, customer_id: int) -> None:
-    route_url = f"{ws_gateway_url}/internal/routes/{driver_id}"
-    headers = {"X-Internal-Key": internal_key, "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        response = await client.put(route_url, json={"customerId": customer_id}, headers=headers)
-        if response.status_code != 200:
-            raise RuntimeError(f"Route mapping failed for driver {driver_id}: {response.status_code} {response.text}")
-
-
-def percentile(values: list[float], pct: float) -> float:
-    if not values:
-        return 0.0
-    data = sorted(values)
-    if len(data) == 1:
-        return data[0]
-    rank = max(0, min(len(data) - 1, int((len(data) - 1) * pct / 100)))
-    return data[rank]
-
-
-def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    if not rows:
-        return
-    fieldnames = ["load", "driver_index", "driver_id", "sent_at", "received_at", "latency_ms"]
-    with path.open("w", newline="", encoding="utf-8") as fp:
-        writer = csv.DictWriter(fp, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-async def measure_latency_for_load(
+async def measure_with_load_levels(
+    customer_token: str,
     ws_url: str,
-    api_base_url: str,
-    load_count: int,
-    duration_seconds: int,
-    customer_email: str,
-    customer_password: str,
-    driver_index: int,
-    internal_key: str,
-    csv_path: Path,
-) -> tuple[list[dict[str, Any]], dict[str, float | int]]:
-    drivers = load_tokens(Path(__file__).resolve().parent / "tokens.json")
-    if load_count > len(drivers):
-        raise ValueError(f"Requested {load_count} drivers but only {len(drivers)} tokens are available")
-    driver_entry = drivers[driver_index]
-    driver_id = driver_entry.get("user_id") or driver_index
+    duration: int,
+    load_levels: list[int]
+) -> list[dict]:
+    """Measure latency at different load levels."""
+    results = []
 
-    customer_token, customer_id = await ensure_customer_token(api_base_url, customer_email, customer_password)
-    ws_gateway_base = normalize_http_url(ws_url)
-    if not internal_key:
-        raise ValueError("--internal-key is required for route mapping; set INTERNAL_KEY or pass --internal-key.")
-    await set_route(ws_gateway_base, internal_key, int(driver_id), int(customer_id))
+    for num_drivers in load_levels:
+        print(f"\n{'=' * 60}")
+        print(f"Testing with {num_drivers} drivers")
+        print(f"{'=' * 60}")
+        print(f"Start drivers.py with --drivers {num_drivers} in another terminal")
+        print("Press Enter when drivers are running...")
+        input()
 
-    received: list[dict[str, Any]] = []
-    deadline = time.monotonic() + duration_seconds
+        stats = await measure_single(customer_token, ws_url, duration)
+        stats["drivers"] = num_drivers
+        results.append(stats)
 
-    async def ws_client() -> None:
-        async with websockets.connect(ws_url, ping_interval=20, ping_timeout=60, open_timeout=15) as websocket:
-            await websocket.send(json.dumps({"t": "auth", "token": customer_token}))
-            await asyncio.sleep(0.5)
-            while time.monotonic() < deadline:
-                try:
-                    raw = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                except (asyncio.TimeoutError, websockets.ConnectionClosed):
-                    continue
-                payload = json.loads(raw)
-                if str(payload.get("t", "")).lower() != "driver_location":
-                    continue
-                sent_at = float(payload.get("sent_at") or payload.get("sentAt") or 0.0)
-                now = time.time()
-                latency_ms = max(0.0, (now - sent_at) * 1000)
-                received.append(
-                    {
-                        "load": load_count,
-                        "driver_index": driver_index,
-                        "driver_id": str(driver_id),
-                        "sent_at": sent_at,
-                        "received_at": now,
-                        "latency_ms": latency_ms,
-                    }
-                )
+        print(f"\nResults for {num_drivers} drivers:")
+        print(f"  Samples: {stats['count']}")
+        print(f"  P50: {stats['p50']:.1f}ms")
+        print(f"  P95: {stats['p95']:.1f}ms")
+        print(f"  P99: {stats['p99']:.1f}ms")
+        print(f"  Max: {stats['max']:.1f}ms")
 
-    await ws_client()
-    summary = {
-        "samples": len(received),
-        "p50": percentile([item["latency_ms"] for item in received], 50),
-        "p95": percentile([item["latency_ms"] for item in received], 95),
-        "p99": percentile([item["latency_ms"] for item in received], 99),
-        "max": max((item["latency_ms"] for item in received), default=0.0),
-    }
-    if received:
-        write_csv(csv_path, received)
-    return received, summary
+    return results
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Measure driver-location latency under increasing load.")
-    parser.add_argument("--drivers", type=int, default=100, help="Single load size when a single benchmark is desired.")
-    parser.add_argument("--load-levels", type=int, nargs="*", default=None, help="Optional benchmark levels, e.g. 100 500 1000")
-    parser.add_argument("--duration", type=int, default=300, help="Measurement window in seconds (minimum 300 for stable stats).")
-    parser.add_argument("--url", default="ws://localhost:8001", help="WebSocket endpoint, e.g. ws://localhost:8001/ws/customer")
-    parser.add_argument("--api-url", default="http://localhost:8000", help="HTTP API gateway base URL.")
-    parser.add_argument("--driver-index", type=int, default=0, help="Driver index to target in tokens.json, default 0.")
-    parser.add_argument("--internal-key", default=os.getenv("INTERNAL_KEY", ""), help="Internal key for ws-gateway route mapping")
-    parser.add_argument("--customer-email", default="customer_loadtest@example.com", help="Email for the virtual customer account.")
-    parser.add_argument("--customer-password", default="LoadTestPass123!", help="Password for the virtual customer account.")
-    parser.add_argument("--csv", default=None, help="Optional CSV export path.")
-    return parser.parse_args()
+def print_comparison_table(results: list[dict]):
+    """Print comparison table across load levels."""
+    print(f"\n{'=' * 60}")
+    print("LATENCY COMPARISON")
+    print(f"{'=' * 60}")
+    print(f"{'Drivers':<10} {'Samples':<10} {'P50 (ms)':<12} {'P95 (ms)':<12} {'P99 (ms)':<12} {'Max (ms)':<12}")
+    print("-" * 60)
+
+    for r in results:
+        print(f"{r['drivers']:<10} {r['count']:<10} "
+              f"{r['p50']:<12.1f} {r['p95']:<12.1f} "
+              f"{r['p99']:<12.1f} {r['max']:<12.1f}")
 
 
-async def main() -> None:
-    args = parse_args()
-    if args.duration < 300:
-        print("WARNING: latency benchmarks are more stable with at least 300s duration.")
+def save_csv(results: list[dict], filename: str):
+    """Save results to CSV."""
+    with open(filename, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["drivers", "count", "p50", "p95", "p99", "max"])
+        writer.writeheader()
+        writer.writerows(results)
 
-    load_levels = args.load_levels or [args.drivers]
-    if not load_levels:
-        load_levels = [100]
-    token_path = Path(__file__).resolve().parent / "tokens.json"
-    if not token_path.exists():
-        raise SystemExit("Tokens file not found. Run tools/loadtest/prepare.py first.")
+    print(f"\n✓ Results saved to {filename}")
 
-    print("NOTE: run this on the same machine as drivers.py to share the same wall clock; otherwise synchronize NTP before comparing results.")
-    print("This measurement includes the full path from the local machine to the VPS/WebSocket gateway, so it is a conservative estimate.")
-    print("Limitations:")
-    print("1) Network jitter and WebSocket batching can add extra latency beyond pure server-side processing.")
-    print("2) Without NTP synchronization across machines, cross-host timing is not precise and may skew p95/p99.")
 
-    ws_url = normalize_ws_url(args.url)
-    api_base_url = normalize_http_url(args.api_url)
-    csv_path = Path(args.csv).expanduser().resolve() if args.csv else Path(__file__).resolve().parent / "latency.csv"
+async def main():
+    parser = argparse.ArgumentParser(
+        description="Measure WebSocket latency",
+        epilog="""
+NOTES:
+1. Run this script on the SAME machine as drivers.py to use the same clock.
+   Running on different machines requires NTP synchronization.
+2. Latency includes network delay from test machine to server,
+   so this is a conservative (upper bound) estimate.
 
-    results: list[dict[str, Any]] = []
-    all_rows: list[dict[str, Any]] = []
-    for load in load_levels:
-        rows, summary = await measure_latency_for_load(
-            ws_url=ws_url,
-            api_base_url=api_base_url,
-            load_count=load,
-            duration_seconds=args.duration,
-            customer_email=args.customer_email,
-            customer_password=args.customer_password,
-            driver_index=args.driver_index,
-            internal_key=args.internal_key,
-            csv_path=csv_path,
-        )
-        results.append({"load": load, **summary})
-        all_rows.extend(rows)
+LIMITATIONS:
+1. Assumes sent_at timestamp from driver is accurate and synchronized.
+2. Single customer measurement may not reflect all routing paths.
+"""
+    )
+    parser.add_argument("--url", default="ws://localhost:8001/ws", help="WebSocket URL")
+    parser.add_argument("--duration", type=int, default=300, help="Duration in seconds (default: 300)")
+    parser.add_argument("--load-test", action="store_true", help="Test with 100, 500, 1000 drivers")
+    parser.add_argument("--output", default="latency_results.csv", help="Output CSV file")
+    args = parser.parse_args()
 
-        print(f"load={load}: samples={summary['samples']} p50={summary['p50']:.2f}ms p95={summary['p95']:.2f}ms p99={summary['p99']:.2f}ms max={summary['max']:.2f}ms")
+    # For simplicity, use driver 0's token as customer
+    # In real scenario, create a separate customer account
+    tokens_file = Path(__file__).parent / "tokens.json"
+    if not tokens_file.exists():
+        print(f"Error: {tokens_file} not found. Run prepare.py first.", file=sys.stderr)
+        sys.exit(1)
 
-    if len(results) > 1:
-        print("\nComparison table")
-        print(f"{'load':>8} {'samples':>8} {'p50(ms)':>10} {'p95(ms)':>10} {'p99(ms)':>10} {'max(ms)':>10}")
-        for item in results:
-            print(
-                f"{item['load']:>8} {item['samples']:>8} "
-                f"{float(item['p50']):>10.2f} {float(item['p95']):>10.2f} {float(item['p99']):>10.2f} {float(item['max']):>10.2f}"
-            )
+    with open(tokens_file) as f:
+        tokens_data = json.load(f)
 
-    if all_rows:
-        write_csv(csv_path, all_rows)
-        print(f"CSV written to {csv_path}")
+    if "0" not in tokens_data:
+        print("Error: Driver 0 not found in tokens.json", file=sys.stderr)
+        sys.exit(1)
+
+    customer_token = tokens_data["0"]["token"]
+
+    print("LATENCY MEASUREMENT")
+    print("=" * 60)
+    print(f"WebSocket URL: {args.url}")
+    print(f"Duration: {args.duration}s")
+    print(f"Minimum samples: {args.duration // 4} (1 update per 4s)")
+    print("\nIMPORTANT:")
+    print("- Run on SAME machine as drivers.py for accurate clock sync")
+    print("- Latency includes network delay (conservative estimate)")
+    print("=" * 60)
+
+    if args.load_test:
+        load_levels = [100, 500, 1000]
+        results = await measure_with_load_levels(customer_token, args.url, args.duration, load_levels)
+        print_comparison_table(results)
+        save_csv(results, args.output)
+    else:
+        print("\nMeasuring latency...")
+        stats = await measure_single(customer_token, args.url, args.duration)
+
+        print(f"\n{'=' * 60}")
+        print("RESULTS")
+        print(f"{'=' * 60}")
+        print(f"Samples collected: {stats['count']}")
+        print(f"P50 latency: {stats['p50']:.1f}ms")
+        print(f"P95 latency: {stats['p95']:.1f}ms")
+        print(f"P99 latency: {stats['p99']:.1f}ms")
+        print(f"Max latency: {stats['max']:.1f}ms")
+
+        # Save single result
+        save_csv([{"drivers": "N/A", **stats}], args.output)
+
+    print("\nLIMITATIONS:")
+    print("1. Assumes sent_at timestamp is accurate and clocks are synchronized")
+    print("2. Single customer may not reflect all message routing paths")
 
 
 if __name__ == "__main__":

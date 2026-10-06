@@ -91,7 +91,7 @@ public class InternalTripController {
 
             return ResponseEntity.ok(Map.of(
                 "tripId", tripId.toString(),
-                "accepted", true
+                "status", "ACCEPTED"
             ));
 
         } catch (Exception e) {

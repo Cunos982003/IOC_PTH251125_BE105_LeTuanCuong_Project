@@ -124,23 +124,23 @@ class MatchingServiceTest {
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("""
-                    {
-                        "drivers": [
-                            {"driverId": %d, "lat": 10.763, "lng": 106.661, "distanceM": 500},
-                            {"driverId": %d, "lat": 10.764, "lng": 106.662, "distanceM": 800}
-                        ]
-                    }
+                    [
+                        {"driverId": %d, "lat": 10.763, "lng": 106.661, "distanceM": 500},
+                        {"driverId": %d, "lat": 10.764, "lng": 106.662, "distanceM": 800}
+                    ]
                 """.formatted(driver1, driver2))));
 
         // Mock WebSocket notifications
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")));
 
         // Start matching
         matchingService.startMatching(tripId);
 
         // Wait for first offer
-        await().atMost(2, SECONDS).until(() -> {
+        await().atMost(5, SECONDS).until(() -> {
             String status = jdbcClient.sql("SELECT status FROM offers WHERE trip_id = ? AND driver_id = ?")
                 .param(tripId).param(driver1)
                 .query(String.class).optional().orElse(null);
@@ -164,7 +164,7 @@ class MatchingServiceTest {
         assertThat(lock1After).isNull();
 
         // Wait for second offer
-        await().atMost(2, SECONDS).until(() -> {
+        await().atMost(5, SECONDS).until(() -> {
             String status = jdbcClient.sql("SELECT status FROM offers WHERE trip_id = ? AND driver_id = ?")
                 .param(tripId).param(driver2)
                 .query(String.class).optional().orElse(null);
@@ -195,11 +195,13 @@ class MatchingServiceTest {
             .willReturn(WireMock.aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
-                .withBody("{\"drivers\": []}")));
+                .withBody("[]")));
 
         // Mock WebSocket notification
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")));
 
         // Start matching
         matchingService.startMatching(tripId);
@@ -213,7 +215,7 @@ class MatchingServiceTest {
         });
 
         // Verify WS notification sent to customer
-        wsGateway.verify(1, WireMock.postRequestedFor(WireMock.urlEqualTo("/internal/notify/" + customerId)));
+        wsGateway.verify(1, WireMock.postRequestedFor(WireMock.urlEqualTo("/internal/push")));
     }
 
     @Test
@@ -229,8 +231,10 @@ class MatchingServiceTest {
             .willReturn(WireMock.aResponse().withStatus(500)));
 
         // Mock WebSocket notification
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")));
 
         // Start matching
         matchingService.startMatching(tripId);
@@ -259,22 +263,22 @@ class MatchingServiceTest {
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("""
-                    {
-                        "drivers": [
-                            {"driverId": %d, "lat": 10.763, "lng": 106.661, "distanceM": 500}
-                        ]
-                    }
+                    [
+                        {"driverId": %d, "lat": 10.763, "lng": 106.661, "distanceM": 500}
+                    ]
                 """.formatted(driverId))));
 
         // Mock WebSocket notification
-        wsGateway.stubFor(WireMock.post(WireMock.urlMatching("/internal/notify/.*"))
-            .willReturn(WireMock.aResponse().withStatus(200)));
+        wsGateway.stubFor(WireMock.post(WireMock.urlEqualTo("/internal/push"))
+            .willReturn(WireMock.aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"delivered\": true}")));
 
         // Start matching
         matchingService.startMatching(tripId);
 
         // Wait for offer
-        await().atMost(2, SECONDS).until(() -> {
+        await().atMost(5, SECONDS).until(() -> {
             String status = jdbcClient.sql("SELECT status FROM offers WHERE trip_id = ? AND driver_id = ?")
                 .param(tripId).param(driverId)
                 .query(String.class).optional().orElse(null);

@@ -3,28 +3,25 @@ package com.ridehailing.paymentservice;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.StreamEntryID;
+import redis.clients.jedis.params.XReadGroupParams;
 
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
 @Testcontainers
 class UserRegisteredEventContractTest {
     @Container
     static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379);
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void consumerParsesContractEvent() throws Exception {
@@ -32,13 +29,14 @@ class UserRegisteredEventContractTest {
         JsonNode node = objectMapper.readTree(fixture);
 
         // Parse with exact fields from contract
-        assertThat(node.has("eventType")).isTrue();
-        assertThat(node.get("eventType").asText()).isEqualTo("UserRegistered");
+        assertThat(node.has("eventId")).isTrue();
+        assertThat(node.has("userId")).isTrue();
+        assertThat(node.get("userId").asLong()).isEqualTo(12345);
 
         // Parse with extra unknown field (tolerance test)
         String withExtra = fixture.replace("}", ", \"unknownField\": \"should-be-ignored\"}");
         JsonNode extraNode = objectMapper.readTree(withExtra);
-        assertThat(extraNode.get("eventType").asText()).isEqualTo("UserRegistered");
+        assertThat(extraNode.get("eventId").asText()).isNotBlank();
 
         // Verify Redis stream write/read works
         try (Jedis jedis = new Jedis(redis.getHost(), redis.getFirstMappedPort())) {
@@ -48,8 +46,9 @@ class UserRegisteredEventContractTest {
             StreamEntryID id = jedis.xadd("events.users", StreamEntryID.NEW_ENTRY, fields);
             assertThat(id).isNotNull();
 
-            var entries = jedis.xreadGroup("payment-grp", "payment-1", 1, 1000, false,
-                Map.entry("events.users", StreamEntryID.UNRECEIVED_ENTRY));
+            var entries = jedis.xreadGroup("payment-grp", "payment-1",
+                    XReadGroupParams.xReadGroupParams().count(1).block(1000),
+                    Map.of("events.users", StreamEntryID.UNRECEIVED_ENTRY));
             assertThat(entries).isNotEmpty();
             assertThat(entries.get(0).getValue()).hasSize(1);
             assertThat(entries.get(0).getValue().get(0).getFields().get("data")).isEqualTo(fixture);

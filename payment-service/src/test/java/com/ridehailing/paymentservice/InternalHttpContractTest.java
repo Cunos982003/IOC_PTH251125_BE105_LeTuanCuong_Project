@@ -9,18 +9,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.*;
 
-@SpringBootTest(classes = InternalHttpContractTest.Config.class, properties = {"INTERNAL_KEY=contract-key", "internal.key=contract-key", "payment.internal-key=contract-key"})
-@AutoConfigureMockMvc
+@SpringBootTest(classes = InternalHttpContractTest.Config.class, properties = {"INTERNAL_KEY=contract-key", "internal.key=contract-key", "payment.internal-key=contract-key"},
+    webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 class InternalHttpContractTest {
     @org.springframework.context.annotation.Configuration
     @EnableAutoConfiguration(excludeName = {"org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration", "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration"})
@@ -30,14 +28,23 @@ class InternalHttpContractTest {
         org.springframework.security.web.SecurityFilterChain contractSecurity(org.springframework.security.config.annotation.web.builders.HttpSecurity http) throws Exception {
             return http.csrf(csrf -> csrf.disable()).authorizeHttpRequests(auth -> auth.anyRequest().permitAll()).build();
         }
+
+        @org.springframework.context.annotation.Bean
+        WalletService walletService() {
+            return new WalletService(null) {
+                @Override
+                public long getBalance(long userId) {
+                    if (userId == 12345L) return 2500000L;
+                    return 0L;
+                }
+            };
+        }
     }
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
-    @MockBean WalletService wallets;
 
     @Test
     void responsesMatchContractSamples() throws Exception {
-        when(wallets.getBalance(12345L)).thenReturn(2500000L);
         check(get("/internal/wallets/12345/balance"), "payment-get-balance");
     }
 
