@@ -77,7 +77,7 @@ public class AuthController {
                 request.fullName(),
                 Instant.now()
         );
-        outboxRepository.insert("events.users", event);
+        outboxRepository.insert("users.registered", event);
 
         // Generate token
         String token = jwtSigner.sign(userId, request.role());

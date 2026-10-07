@@ -14,6 +14,15 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 5000
+
   data:
     redis:
       host: ${REDIS_HOST}

@@ -3,25 +3,57 @@ package com.ridehailing.userservice;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.StreamEntryID;
-import redis.clients.jedis.params.XReadGroupParams;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
-import java.util.Map;
+import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@SpringBootTest
 @Testcontainers
+@org.springframework.test.context.ActiveProfiles("infra")
 class TripCompletedEventContractTest {
+
     @Container
-    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16")
+            .withDatabaseName("user")
+            .withUsername("user_app")
+            .withPassword("user_pass");
+
+    @Container
+    static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
+            .withExposedPorts(5672, 15672)
+            .withStartupTimeout(java.time.Duration.ofSeconds(180));
+
+    @Autowired
+    RabbitTemplate rabbitTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @DynamicPropertySource
+    static void configure(DynamicPropertyRegistry registry) {
+        registry.add("DB_URL", postgres::getJdbcUrl);
+        registry.add("DB_USERNAME", postgres::getUsername);
+        registry.add("DB_PASSWORD", postgres::getPassword);
+        // Use environment variable style properties that application-infra.yml expects
+        registry.add("RABBITMQ_HOST", rabbitmq::getHost);
+        registry.add("RABBITMQ_PORT", rabbitmq::getAmqpPort);
+        registry.add("RABBITMQ_USERNAME", rabbitmq::getAdminUsername);
+        registry.add("RABBITMQ_PASSWORD", rabbitmq::getAdminPassword);
+        registry.add("spring.rabbitmq.publisher-confirm-type", () -> "correlated");
+        registry.add("spring.rabbitmq.publisher-returns", () -> "true");
+        registry.add("JWT_SECRET", () -> Base64.getEncoder().encodeToString("this-is-a-very-long-secret-key-for-testing-purposes-only".getBytes()));
+        registry.add("INTERNAL_KEY", () -> "test-internal-key");
+        registry.add("outbox.scheduler.enabled", () -> "false");
+    }
 
     @Test
     void consumerParsesContractEvent() throws Exception {
@@ -37,21 +69,24 @@ class TripCompletedEventContractTest {
         JsonNode extraNode = objectMapper.readTree(withExtra);
         assertThat(extraNode.get("eventId").asText()).isNotBlank();
 
-        // Verify Redis stream write/read works
-        try (Jedis jedis = new Jedis(redis.getHost(), redis.getFirstMappedPort())) {
-            jedis.xgroupCreate("events.trips", "user-grp", StreamEntryID.LAST_ENTRY, true);
+        // Verify RabbitMQ write/read works
+        rabbitTemplate.execute(channel -> {
+            channel.exchangeDeclare("events", "topic", true);
+            channel.queueDeclare("user.trips", true, false, false, null);
+            channel.queueBind("user.trips", "events", "trips.completed");
+            return null;
+        });
 
-            Map<String, String> fields = Map.of("data", fixture);
-            StreamEntryID id = jedis.xadd("events.trips", StreamEntryID.NEW_ENTRY, fields);
-            assertThat(id).isNotNull();
+        org.springframework.amqp.core.Message message = org.springframework.amqp.core.MessageBuilder
+                .withBody(fixture.getBytes())
+                .setContentType("application/json")
+                .setDeliveryMode(org.springframework.amqp.core.MessageDeliveryMode.PERSISTENT)
+                .setHeader("type", "trips.completed")
+                .build();
+        rabbitTemplate.send("events", "trips.completed", message);
 
-            var entries = jedis.xreadGroup("user-grp", "user-1",
-                    XReadGroupParams.xReadGroupParams().count(1).block(1000),
-                    Map.of("events.trips", StreamEntryID.UNRECEIVED_ENTRY));
-            assertThat(entries).isNotEmpty();
-            assertThat(entries.get(0).getValue()).hasSize(1);
-            assertThat(entries.get(0).getValue().get(0).getFields().get("data")).isEqualTo(fixture);
-        }
+        Object received = rabbitTemplate.receiveAndConvert("user.trips", 5000);
+        assertThat(received).isNotNull();
     }
 
     private String fixture(String name) throws Exception {

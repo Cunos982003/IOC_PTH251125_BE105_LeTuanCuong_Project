@@ -1,9 +1,20 @@
 # TripCompleted Event
 
-**Stream:** `events.trips`  
+**Exchange:** `events` (topic)  
+**Routing Key:** `trips.completed`  
 **Writer:** `dispatch-service`  
+**Queues:** `trip.events.completed`  
 **Readers:** `payment-service` (thanh toán, chia hoa hồng), `user-service` (cập nhật lịch sử)  
 **Consumer group:** `payment-trips`, `user-trips`
+
+## Message Properties
+
+| Property | Value |
+|----------|-------|
+| `content-type` | `application/json` |
+| `delivery_mode` | `2` (persistent) |
+| `headers.eventId` | UUID (idempotency key) |
+| `headers.type` | `trips.completed` |
 
 ## Payload Fields
 
@@ -34,3 +45,5 @@
 - `fare` là số nguyên (đồng), không dùng double
 - `payment-service` trừ tiền khách, cộng hoa hồng tài xế
 - `user-service` cập nhật lịch sử chuyến của cả hai bên
+- Message được publish với `mandatory=true`, publisher confirm enabled
+- Consumer ack sau khi xử lý xong, retry 3 lần với backoff rồi DLQ

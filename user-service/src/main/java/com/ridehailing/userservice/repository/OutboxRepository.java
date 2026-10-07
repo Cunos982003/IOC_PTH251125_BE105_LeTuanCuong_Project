@@ -20,7 +20,7 @@ public class OutboxRepository {
         this.objectMapper = objectMapper;
     }
 
-    public void insert(String stream, Object event) {
+    public void insert(String routingKey, Object event) {
         try {
             String json = objectMapper.writeValueAsString(event);
             PGobject jsonb = new PGobject();
@@ -28,10 +28,10 @@ public class OutboxRepository {
             jsonb.setValue(json);
 
             jdbcClient.sql("""
-                            INSERT INTO outbox (stream, payload, created_at)
+                            INSERT INTO outbox (routing_key, payload, created_at)
                             VALUES (?, ?, now())
                             """)
-                    .param(stream)
+                    .param(routingKey)
                     .param(jsonb)
                     .update();
         } catch (JsonProcessingException | SQLException e) {
@@ -41,7 +41,7 @@ public class OutboxRepository {
 
     public List<OutboxRecord> fetchPending(int batchSize) {
         return jdbcClient.sql("""
-                        SELECT id, stream, payload::text
+                        SELECT id, routing_key, payload::text
                         FROM outbox
                         WHERE sent_at IS NULL
                         ORDER BY id
@@ -51,7 +51,7 @@ public class OutboxRepository {
                 .param(batchSize)
                 .query((rs, rowNum) -> new OutboxRecord(
                         rs.getLong("id"),
-                        rs.getString("stream"),
+                        rs.getString("routing_key"),
                         rs.getString("payload")
                 ))
                 .list();
@@ -63,5 +63,5 @@ public class OutboxRepository {
                 .update();
     }
 
-    public record OutboxRecord(Long id, String stream, String payload) {}
+    public record OutboxRecord(Long id, String routingKey, String payload) {}
 }

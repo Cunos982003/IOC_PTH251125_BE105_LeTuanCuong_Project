@@ -1,9 +1,20 @@
 # TripCancelled Event
 
-**Stream:** `events.trips`  
+**Exchange:** `events` (topic)  
+**Routing Key:** `trips.cancelled`  
 **Writer:** `dispatch-service`  
+**Queues:** `trip.events.cancelled`  
 **Readers:** `payment-service` (hoàn tiền nếu đã khấu), `user-service` (cập nhật lịch sử)  
 **Consumer group:** `payment-trips`, `user-trips`
+
+## Message Properties
+
+| Property | Value |
+|----------|-------|
+| `content-type` | `application/json` |
+| `delivery_mode` | `2` (persistent) |
+| `headers.eventId` | UUID (idempotency key) |
+| `headers.type` | `trips.cancelled` |
 
 ## Payload Fields
 
@@ -33,3 +44,5 @@
 - `eventId` dùng làm khóa idempotent
 - `driverId` có thể null nếu hủy trước khi ghép tài xế
 - `payment-service` hoàn tiền nếu khách đã bị khấu
+- Message được publish với `mandatory=true`, publisher confirm enabled
+- Consumer ack sau khi xử lý xong, retry 3 lần với backoff rồi DLQ
