@@ -3,6 +3,11 @@ package com.ridehailing.dispatchservice.worker;
 import com.ridehailing.dispatchservice.domain.TripStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -11,6 +16,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -36,12 +42,19 @@ class StuckTripScannerTest {
         .withPassword("dispatch_pass");
 
     @Container
+    static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
+        .withExposedPorts(5672, 15672);
+
+    @Container
     static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine")
         .withExposedPorts(6379)
         .withCommand("redis-server", "--requirepass", "redis_pass");
 
     @Autowired
     JdbcClient jdbcClient;
+
+    @Autowired
+    RabbitTemplate rabbitTemplate;
 
     @Autowired
     StuckTripScanner scanner;
@@ -52,15 +65,42 @@ class StuckTripScannerTest {
         registry.add("DB_URL", postgres::getJdbcUrl);
         registry.add("DB_USERNAME", postgres::getUsername);
         registry.add("DB_PASSWORD", postgres::getPassword);
-        registry.add("REDIS_HOST", redis::getHost);
-        registry.add("REDIS_PORT", redis::getFirstMappedPort);
-        registry.add("REDIS_PASSWORD", () -> "redis_pass");
+        registry.add("spring.rabbitmq.host", rabbitmq::getHost);
+        registry.add("spring.rabbitmq.port", rabbitmq::getAmqpPort);
+        registry.add("spring.rabbitmq.username", rabbitmq::getAdminUsername);
+        registry.add("spring.rabbitmq.password", rabbitmq::getAdminPassword);
+        registry.add("spring.rabbitmq.publisher-confirm-type", () -> "correlated");
+        registry.add("spring.rabbitmq.publisher-returns", () -> "true");
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", redis::getFirstMappedPort);
+        registry.add("spring.data.redis.password", () -> "redis_pass");
         registry.add("INTERNAL_KEY", () -> "test-internal-key");
         registry.add("JWT_SECRET", () -> "test-jwt-secret");
         registry.add("PRICING_SERVICE_URL", () -> "http://localhost:9999");
         registry.add("PAYMENT_SERVICE_URL", () -> "http://localhost:9999");
         registry.add("LOCATION_SERVICE_URL", () -> "http://localhost:9999");
         registry.add("WS_GATEWAY_URL", () -> "http://localhost:9999");
+    }
+
+    @BeforeEach
+    void setup() {
+        // Declare exchange and queues for testing
+        TopicExchange exchange = new TopicExchange("events", true, false);
+        rabbitTemplate.execute(channel -> {
+            channel.exchangeDeclare(exchange.getName(), "topic", true);
+            return null;
+        });
+
+        // Declare queues and bindings for trips.completed and trips.cancelled
+        String[] routingKeys = {"trips.completed", "trips.cancelled"};
+        for (String rk : routingKeys) {
+            String queueName = rk.replace(".", "-");
+            rabbitTemplate.execute(channel -> {
+                channel.queueDeclare(queueName, true, false, false, null);
+                channel.queueBind(queueName, "events", rk);
+                return null;
+            });
+        }
     }
 
     @BeforeEach
@@ -99,14 +139,16 @@ class StuckTripScannerTest {
             .single();
         assertThat(recentStatus).isEqualTo("MATCHING");
 
-        // And: event written to outbox
-        Integer outboxCount = jdbcClient.sql("""
-            SELECT COUNT(*) FROM outbox
-            WHERE stream = 'events.trips'
-        """)
-            .query(Integer.class)
-            .single();
-        assertThat(outboxCount).isGreaterThanOrEqualTo(1);
+        // And: event written to outbox (NO_DRIVER_FOUND event uses trips.completed routing)
+        await().atMost(5, SECONDS).untilAsserted(() -> {
+            Integer outboxCount = jdbcClient.sql("""
+                SELECT COUNT(*) FROM outbox
+                WHERE routing_key = 'trips.completed'
+            """)
+                .query(Integer.class)
+                .single();
+            assertThat(outboxCount).isGreaterThanOrEqualTo(1);
+        });
     }
 
     @Test
@@ -166,7 +208,7 @@ class StuckTripScannerTest {
 
         Integer outboxCountBefore = jdbcClient.sql("""
             SELECT COUNT(*) FROM outbox
-            WHERE stream = 'events.trips'
+            WHERE routing_key = 'trips.completed'
         """)
             .query(Integer.class)
             .single();
@@ -177,7 +219,7 @@ class StuckTripScannerTest {
         // Then: no additional events created
         Integer outboxCountAfter = jdbcClient.sql("""
             SELECT COUNT(*) FROM outbox
-            WHERE stream = 'events.trips'
+            WHERE routing_key = 'trips.completed'
         """)
             .query(Integer.class)
             .single();

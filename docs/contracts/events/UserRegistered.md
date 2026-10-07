@@ -1,9 +1,20 @@
 # UserRegistered Event
 
-**Stream:** `events.users`  
+**Exchange:** `events` (topic)  
+**Routing Key:** `users.registered`  
 **Writer:** `user-service`  
+**Queues:** `user.events.registered`  
 **Readers:** `payment-service` (cập nhật ví), `user-service` (audit log)  
 **Consumer group:** `payment-users`, `user-audit`
+
+## Message Properties
+
+| Property | Value |
+|----------|-------|
+| `content-type` | `application/json` |
+| `delivery_mode` | `2` (persistent) |
+| `headers.eventId` | UUID (idempotency key) |
+| `headers.type` | `users.registered` |
 
 ## Payload Fields
 
@@ -30,4 +41,5 @@
 ## Ghi chú
 - `eventId` dùng làm khóa idempotent khi consumer xử lý
 - `payment-service` dùng để tạo ví điện tử cho user mới
-- Tiền là số nguyên (đồng) - không áp dụng cho event này
+- Message được publish với `mandatory=true`, publisher confirm enabled
+- Consumer ack sau khi xử lý xong, retry 3 lần với backoff rồi DLQ

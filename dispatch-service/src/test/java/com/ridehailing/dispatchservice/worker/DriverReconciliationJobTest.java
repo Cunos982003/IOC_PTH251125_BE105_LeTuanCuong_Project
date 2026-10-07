@@ -6,6 +6,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -13,8 +15,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -42,7 +44,11 @@ class DriverReconciliationJobTest {
         .withPassword("dispatch_pass");
 
     @Container
-    static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine")
+    static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
+        .withExposedPorts(5672, 15672);
+
+    @Container
+    static org.testcontainers.containers.GenericContainer<?> redis = new org.testcontainers.containers.GenericContainer<>("redis:7-alpine")
         .withExposedPorts(6379)
         .withCommand("redis-server", "--requirepass", "redis_pass");
 
@@ -64,6 +70,10 @@ class DriverReconciliationJobTest {
         registry.add("DB_URL", postgres::getJdbcUrl);
         registry.add("DB_USERNAME", postgres::getUsername);
         registry.add("DB_PASSWORD", postgres::getPassword);
+        registry.add("RABBITMQ_HOST", rabbitmq::getHost);
+        registry.add("RABBITMQ_PORT", rabbitmq::getAmqpPort);
+        registry.add("RABBITMQ_USER", rabbitmq::getAdminUsername);
+        registry.add("RABBITMQ_PASSWORD", rabbitmq::getAdminPassword);
         registry.add("REDIS_HOST", redis::getHost);
         registry.add("REDIS_PORT", redis::getFirstMappedPort);
         registry.add("REDIS_PASSWORD", () -> "redis_pass");

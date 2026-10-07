@@ -1,6 +1,17 @@
 {
     "contracts":  [
                       {
+                          "name":  "events/DriverOffered",
+                          "files":  [
+                                        ".json",
+                                        ".md"
+                                    ],
+                          "services":  [
+                                           "dispatch-service",
+                                           "ws-gateway"
+                                       ]
+                      },
+                      {
                           "name":  "events/TripCancelled",
                           "files":  [
                                         ".json",

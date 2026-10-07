@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -19,6 +20,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -51,6 +53,10 @@ class ConcurrencyTest {
         .withExposedPorts(6379)
         .withCommand("redis-server", "--requirepass", "redis_pass");
 
+    @Container
+    static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
+        .withExposedPorts(5672, 15672);
+
     static WireMockServer locationService;
     static WireMockServer wsGateway;
     static WireMockServer pricingService;
@@ -80,6 +86,9 @@ class ConcurrencyTest {
     RedisTemplate<String, String> redisTemplate;
 
     @Autowired
+    RabbitTemplate rabbitTemplate;
+
+    @Autowired
     ObjectMapper objectMapper;
 
     @Autowired
@@ -91,9 +100,15 @@ class ConcurrencyTest {
         registry.add("DB_URL", postgres::getJdbcUrl);
         registry.add("DB_USERNAME", postgres::getUsername);
         registry.add("DB_PASSWORD", postgres::getPassword);
-        registry.add("REDIS_HOST", redis::getHost);
-        registry.add("REDIS_PORT", redis::getFirstMappedPort);
-        registry.add("REDIS_PASSWORD", () -> "redis_pass");
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", redis::getFirstMappedPort);
+        registry.add("spring.data.redis.password", () -> "redis_pass");
+        registry.add("spring.rabbitmq.host", rabbitmq::getHost);
+        registry.add("spring.rabbitmq.port", rabbitmq::getAmqpPort);
+        registry.add("spring.rabbitmq.username", rabbitmq::getAdminUsername);
+        registry.add("spring.rabbitmq.password", rabbitmq::getAdminPassword);
+        registry.add("spring.rabbitmq.publisher-confirm-type", () -> "correlated");
+        registry.add("spring.rabbitmq.publisher-returns", () -> "true");
         registry.add("INTERNAL_KEY", () -> "test-internal-key");
         registry.add("JWT_SECRET", () -> "test-jwt-secret");
         registry.add("PRICING_SERVICE_URL", () -> "http://localhost:" + pricingService.port());
@@ -113,6 +128,17 @@ class ConcurrencyTest {
         if (wsGateway != null) wsGateway.stop();
         if (pricingService != null) pricingService.stop();
         if (paymentService != null) paymentService.stop();
+    }
+
+    @BeforeEach
+    void setup() {
+        // Declare exchange and queue for driver offers
+        rabbitTemplate.execute(channel -> {
+            channel.exchangeDeclare("events", "topic", true);
+            channel.queueDeclare("trips-offered", true, false, false, null);
+            channel.queueBind("trips-offered", "events", "trips.offered");
+            return null;
+        });
     }
 
     @BeforeEach

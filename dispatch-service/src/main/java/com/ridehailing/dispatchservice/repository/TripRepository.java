@@ -225,11 +225,16 @@ public class TripRepository {
     private void publishEvent(TripEvent event) {
         try {
             String payload = objectMapper.writeValueAsString(event);
+            String routingKey = switch (event.eventType()) {
+                case "TRIP_COMPLETED" -> "trips.completed";
+                case "TRIP_CANCELLED" -> "trips.cancelled";
+                default -> "trips.completed";
+            };
             jdbcClient.sql("""
-                INSERT INTO outbox (stream, payload, created_at)
+                INSERT INTO outbox (routing_key, payload, created_at)
                 VALUES (?, ?::jsonb, ?)
             """)
-                .param("events.trips")
+                .param(routingKey)
                 .param(payload)
                 .param(Timestamp.from(Instant.now()))
                 .update();

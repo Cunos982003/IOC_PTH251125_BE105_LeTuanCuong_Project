@@ -1,0 +1,216 @@
+{
+  "rabbit_version": "3.13.7",
+  "rabbitmq_version": "3.13.7",
+  "product_version": "3.13.7",
+  "product_name": "RabbitMQ",
+  "users": [],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [],
+  "topic_permissions": [],
+  "parameters": [],
+  "global_parameters": [
+    {
+      "name": "cluster_name",
+      "value": "rabbit@localhost"
+    }
+  ],
+  "policies": [],
+  "queues": [
+    {
+      "name": "user.events.registered",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "user.events.registered.dlq"
+      }
+    },
+    {
+      "name": "user.events.updated",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "user.events.updated.dlq"
+      }
+    },
+    {
+      "name": "user.events.driver_approved",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "user.events.driver_approved.dlq"
+      }
+    },
+    {
+      "name": "trip.events.requested",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "trip.events.requested.dlq"
+      }
+    },
+    {
+      "name": "trip.events.accepted",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "trip.events.accepted.dlq"
+      }
+    },
+    {
+      "name": "trip.events.started",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "trip.events.started.dlq"
+      }
+    },
+    {
+      "name": "trip.events.completed",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "trip.events.completed.dlq"
+      }
+    },
+    {
+      "name": "trip.events.cancelled",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "trip.events.cancelled.dlq"
+      }
+    },
+    {
+      "name": "trip.events.offered",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "trip.events.offered.dlq"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "events",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "events.dlx",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "user.events.registered",
+      "destination_type": "queue",
+      "routing_key": "users.registered",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "user.events.updated",
+      "destination_type": "queue",
+      "routing_key": "users.updated",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "user.events.driver_approved",
+      "destination_type": "queue",
+      "routing_key": "users.driver_approved",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "trip.events.requested",
+      "destination_type": "queue",
+      "routing_key": "trips.requested",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "trip.events.accepted",
+      "destination_type": "queue",
+      "routing_key": "trips.accepted",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "trip.events.started",
+      "destination_type": "queue",
+      "routing_key": "trips.started",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "trip.events.completed",
+      "destination_type": "queue",
+      "routing_key": "trips.completed",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "trip.events.cancelled",
+      "destination_type": "queue",
+      "routing_key": "trips.cancelled",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "trip.events.offered",
+      "destination_type": "queue",
+      "routing_key": "trips.offered",
+      "arguments": {}
+    },
+    {
+      "source": "events.dlx",
+      "vhost": "/",
+      "destination": "user.events.registered",
+      "destination_type": "queue",
+      "routing_key": "user.events.registered.dlq",
+      "arguments": {}
+    }
+  ]
+}

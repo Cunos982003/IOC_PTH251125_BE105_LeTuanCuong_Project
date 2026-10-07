@@ -26,6 +26,16 @@ spring:
           max-idle: 10
           min-idle: 5
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+
   flyway:
     enabled: true
     locations: classpath:db/migration

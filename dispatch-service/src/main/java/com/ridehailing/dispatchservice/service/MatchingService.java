@@ -1,11 +1,21 @@
 package com.ridehailing.dispatchservice.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rabbitmq.client.AMQP;
 import com.ridehailing.dispatchservice.client.LocationClient;
 import com.ridehailing.dispatchservice.client.WsGatewayClient;
+import com.ridehailing.dispatchservice.config.RabbitCallbackRegistry;
 import com.ridehailing.dispatchservice.domain.Trip;
 import com.ridehailing.dispatchservice.domain.TripEvent;
 import com.ridehailing.dispatchservice.domain.TripStatus;
 import com.ridehailing.dispatchservice.repository.TripRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageBuilder;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -15,42 +25,69 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 @Service
 public class MatchingService {
 
+    private static final Logger log = LoggerFactory.getLogger(MatchingService.class);
     private static final int SEARCH_RADIUS_M = 3000;
     private static final int MAX_CANDIDATES = 5;
     private static final Duration OFFER_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
     private static final long LOCK_TTL_MS = 20000;
+    private static final String EXCHANGE = "events";
+    private static final String DRIVER_OFFERED_ROUTING_KEY = "trips.offered";
+    private static final Duration OFFER_CONFIRM_TIMEOUT = Duration.ofSeconds(1);
+    private static final String OFFER_PREFIX = "offer-";
 
     private final TripRepository tripRepository;
     private final JdbcClient jdbcClient;
     private final LocationClient locationClient;
     private final WsGatewayClient wsGatewayClient;
+    private final RabbitTemplate rabbitTemplate;
+    private final ObjectMapper objectMapper;
     private final RedisTemplate<String, String> redisTemplate;
     private final DefaultRedisScript<Long> compareAndDeleteScript;
     private final ExecutorService matchExecutor;
+    private final RabbitCallbackRegistry callbackRegistry;
+    private final Map<String, CompletableFuture<Void>> pendingOffers = new ConcurrentHashMap<>();
 
     public MatchingService(TripRepository tripRepository,
                           JdbcClient jdbcClient,
                           LocationClient locationClient,
                           WsGatewayClient wsGatewayClient,
+                          RabbitTemplate rabbitTemplate,
+                          ObjectMapper objectMapper,
                           RedisTemplate<String, String> redisTemplate,
-                          DefaultRedisScript<Long> compareAndDeleteScript) {
+                          DefaultRedisScript<Long> compareAndDeleteScript,
+                          RabbitCallbackRegistry callbackRegistry) {
         this.tripRepository = tripRepository;
         this.jdbcClient = jdbcClient;
         this.locationClient = locationClient;
         this.wsGatewayClient = wsGatewayClient;
+        this.rabbitTemplate = rabbitTemplate;
+        this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
         this.compareAndDeleteScript = compareAndDeleteScript;
         this.matchExecutor = Executors.newVirtualThreadPerTaskExecutor();
+        this.callbackRegistry = callbackRegistry;
+
+        // Register confirm/return handlers for driver offers
+        callbackRegistry.registerConfirmHandler(OFFER_PREFIX, (ack, cause) -> {
+            // Handled by callbackRegistry.handleConfirm which completes the future
+        });
+        callbackRegistry.registerReturnHandler(OFFER_PREFIX, (replyText, message) -> {
+            log.warn("Driver offer returned: {}", replyText);
+        });
     }
 
     public void startMatching(UUID tripId) {
@@ -109,11 +146,14 @@ public class MatchingService {
                     // Record offer
                     recordOffer(tripId, driverId, "OFFERED");
 
-                    // Push offer to driver
-                    try {
-                        wsGatewayClient.notifyDriverOffer(driverId, tripId, trip.fare());
-                    } catch (Exception e) {
-                        System.err.println("Failed to push offer to driver " + driverId + ": " + e.getMessage());
+                    // Publish DriverOffered event directly to RabbitMQ
+                    boolean published = publishDriverOffered(tripId, driverId, trip.fare(), trip.pickupLat(), trip.pickupLng());
+
+                    if (!published) {
+                        // Publish failed - treat as if offer never reached driver, move to next
+                        expireOffer(tripId, driverId);
+                        releaseLock(lockKey, tripId.toString());
+                        continue;
                     }
 
                     // Wait for response
@@ -228,6 +268,52 @@ public class MatchingService {
             }
         } catch (Exception e) {
             System.err.println("Failed to transition to NO_DRIVER_FOUND: " + e.getMessage());
+        }
+    }
+
+    private boolean publishDriverOffered(UUID tripId, long driverId, long fare, double pickupLat, double pickupLng) {
+        String correlationId = OFFER_PREFIX + tripId + "-" + driverId;
+        CompletableFuture<Void> confirmFuture = callbackRegistry.registerFuture(correlationId);
+        pendingOffers.put(correlationId, confirmFuture);
+
+        try {
+            Map<String, Object> payload = Map.of(
+                "eventId", UUID.randomUUID().toString(),
+                "tripId", tripId.toString(),
+                "driverId", driverId,
+                "customerId", tripRepository.findById(tripId).map(Trip::customerId).orElse(0L),
+                "pickup", Map.of("lat", pickupLat, "lng", pickupLng),
+                "fare", fare,
+                "expiresAt", Instant.now().plus(OFFER_TIMEOUT).toString()
+            );
+
+            String jsonPayload = objectMapper.writeValueAsString(payload);
+
+            Message message = MessageBuilder.withBody(jsonPayload.getBytes())
+                    .setContentType("application/json")
+                    .setDeliveryMode(org.springframework.amqp.core.MessageDeliveryMode.PERSISTENT)
+                    .setHeader("eventId", payload.get("eventId"))
+                    .setHeader("type", DRIVER_OFFERED_ROUTING_KEY)
+                    .setCorrelationId(correlationId)
+                    .build();
+
+            CorrelationData correlationData = new CorrelationData(correlationId);
+            rabbitTemplate.convertAndSend(EXCHANGE, DRIVER_OFFERED_ROUTING_KEY, message, correlationData);
+
+            // Wait for confirm with 1s timeout
+            confirmFuture.get(OFFER_CONFIRM_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            return true;
+
+        } catch (TimeoutException e) {
+            log.warn("Driver offer confirm timeout for trip {} driver {}", tripId, driverId);
+            pendingOffers.remove(correlationId);
+            callbackRegistry.removeFuture(correlationId);
+            return false;
+        } catch (Exception e) {
+            log.warn("Failed to publish driver offer for trip {} driver {}: {}", tripId, driverId, e.getMessage());
+            pendingOffers.remove(correlationId);
+            callbackRegistry.removeFuture(correlationId);
+            return false;
         }
     }
 }

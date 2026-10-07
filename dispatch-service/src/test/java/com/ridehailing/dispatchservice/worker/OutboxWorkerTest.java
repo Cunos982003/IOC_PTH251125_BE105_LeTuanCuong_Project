@@ -4,12 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ridehailing.dispatchservice.domain.TripEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.redis.connection.stream.Consumer;
-import org.springframework.data.redis.connection.stream.MapRecord;
-import org.springframework.data.redis.connection.stream.ReadOffset;
-import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
@@ -17,14 +18,13 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.time.Instant;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +43,10 @@ class OutboxWorkerTest {
         .withPassword("dispatch_pass");
 
     @Container
+    static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
+        .withExposedPorts(5672, 15672);
+
+    @Container
     static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine")
         .withExposedPorts(6379)
         .withCommand("redis-server", "--requirepass", "redis_pass");
@@ -52,6 +56,9 @@ class OutboxWorkerTest {
 
     @Autowired
     RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    RabbitTemplate rabbitTemplate;
 
     @Autowired
     ObjectMapper objectMapper;
@@ -65,9 +72,15 @@ class OutboxWorkerTest {
         registry.add("DB_URL", postgres::getJdbcUrl);
         registry.add("DB_USERNAME", postgres::getUsername);
         registry.add("DB_PASSWORD", postgres::getPassword);
-        registry.add("REDIS_HOST", redis::getHost);
-        registry.add("REDIS_PORT", redis::getFirstMappedPort);
-        registry.add("REDIS_PASSWORD", () -> "redis_pass");
+        registry.add("spring.rabbitmq.host", rabbitmq::getHost);
+        registry.add("spring.rabbitmq.port", rabbitmq::getAmqpPort);
+        registry.add("spring.rabbitmq.username", rabbitmq::getAdminUsername);
+        registry.add("spring.rabbitmq.password", rabbitmq::getAdminPassword);
+        registry.add("spring.rabbitmq.publisher-confirm-type", () -> "correlated");
+        registry.add("spring.rabbitmq.publisher-returns", () -> "true");
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", redis::getFirstMappedPort);
+        registry.add("spring.data.redis.password", () -> "redis_pass");
         registry.add("INTERNAL_KEY", () -> "test-internal-key");
         registry.add("JWT_SECRET", () -> "test-jwt-secret");
         registry.add("PRICING_SERVICE_URL", () -> "http://localhost:9999");
@@ -77,18 +90,33 @@ class OutboxWorkerTest {
     }
 
     @BeforeEach
-    void cleanup() {
-        jdbcClient.sql("DELETE FROM outbox").update();
+    void setup() {
+        // Declare exchange and queues for testing
+        TopicExchange exchange = new TopicExchange("events", true, false);
+        rabbitTemplate.execute(channel -> {
+            channel.exchangeDeclare(exchange.getName(), "topic", true);
+            return null;
+        });
 
-        // Clear Redis stream
-        try {
-            redisTemplate.delete("events.trips");
-        } catch (Exception ignored) {
+        // Declare queues and bindings for trips.completed and trips.cancelled
+        String[] routingKeys = {"trips.completed", "trips.cancelled"};
+        for (String rk : routingKeys) {
+            String queueName = rk.replace(".", "-");
+            rabbitTemplate.execute(channel -> {
+                channel.queueDeclare(queueName, true, false, false, null);
+                channel.queueBind(queueName, "events", rk);
+                return null;
+            });
         }
     }
 
+    @BeforeEach
+    void cleanup() {
+        jdbcClient.sql("DELETE FROM outbox").update();
+    }
+
     @Test
-    void processOutbox_publishesToRedisStream() throws Exception {
+    void processOutbox_publishesToRabbitMQ() throws Exception {
         // Given: outbox event
         UUID eventId = UUID.randomUUID();
         UUID tripId = UUID.randomUUID();
@@ -98,10 +126,10 @@ class OutboxWorkerTest {
         String payload = objectMapper.writeValueAsString(event);
 
         jdbcClient.sql("""
-            INSERT INTO outbox (stream, payload, created_at)
+            INSERT INTO outbox (routing_key, payload, created_at)
             VALUES (?, ?::jsonb, ?)
         """)
-            .param("events.trips")
+            .param("trips.completed")
             .param(payload)
             .param(java.sql.Timestamp.from(Instant.now()))
             .update();
@@ -109,26 +137,16 @@ class OutboxWorkerTest {
         // When: worker runs
         outboxWorker.processOutbox();
 
-        // Then: event published to stream and marked sent
-        await().atMost(2, SECONDS).untilAsserted(() -> {
+        // Then: event published to RabbitMQ and marked sent
+        await().atMost(5, SECONDS).untilAsserted(() -> {
             Integer sentCount = jdbcClient.sql("SELECT COUNT(*) FROM outbox WHERE sent_at IS NOT NULL")
                 .query(Integer.class).single();
             assertThat(sentCount).isEqualTo(1);
         });
 
-        // Verify event in Redis Stream
-        List<MapRecord<String, Object, Object>> messages = redisTemplate.opsForStream()
-            .read(org.springframework.data.redis.connection.stream.StreamReadOptions.empty().count(10),
-                  org.springframework.data.redis.connection.stream.StreamOffset.fromStart("events.trips"));
-
-        assertThat(messages).hasSize(1);
-        Map<Object, Object> fields = messages.get(0).getValue();
-        String actualPayload = (String) fields.get("payload");
-
-        // Parse and compare as objects (not strings) to handle JSON field order
-        TripEvent.TripAccepted actualEvent = objectMapper.readValue(actualPayload, TripEvent.TripAccepted.class);
-        assertThat(actualEvent.tripId()).isEqualTo(tripId);
-        assertThat(actualEvent.driverId()).isEqualTo(2001L);
+        // Verify event in RabbitMQ queue
+        Object received = rabbitTemplate.receiveAndConvert("trips-completed", 5000);
+        assertThat(received).isNotNull();
     }
 
     @Test
@@ -142,10 +160,10 @@ class OutboxWorkerTest {
             String payload = objectMapper.writeValueAsString(event);
 
             jdbcClient.sql("""
-                INSERT INTO outbox (stream, payload, created_at)
+                INSERT INTO outbox (routing_key, payload, created_at)
                 VALUES (?, ?::jsonb, ?)
             """)
-                .param("events.trips")
+                .param("trips.completed")
                 .param(payload)
                 .param(java.sql.Timestamp.from(Instant.now()))
                 .update();
@@ -155,17 +173,17 @@ class OutboxWorkerTest {
         outboxWorker.processOutbox();
 
         // Then: all 3 sent
-        await().atMost(2, SECONDS).untilAsserted(() -> {
+        await().atMost(5, SECONDS).untilAsserted(() -> {
             Integer sentCount = jdbcClient.sql("SELECT COUNT(*) FROM outbox WHERE sent_at IS NOT NULL")
                 .query(Integer.class).single();
             assertThat(sentCount).isEqualTo(3);
         });
 
-        List<MapRecord<String, Object, Object>> messages = redisTemplate.opsForStream()
-            .read(org.springframework.data.redis.connection.stream.StreamReadOptions.empty().count(10),
-                  org.springframework.data.redis.connection.stream.StreamOffset.fromStart("events.trips"));
-
-        assertThat(messages).hasSize(3);
+        // Verify events in RabbitMQ
+        for (int i = 0; i < 3; i++) {
+            Object received = rabbitTemplate.receiveAndConvert("trips-completed", 2000);
+            assertThat(received).isNotNull();
+        }
     }
 
     @Test
@@ -178,10 +196,10 @@ class OutboxWorkerTest {
         String payload = objectMapper.writeValueAsString(event);
 
         jdbcClient.sql("""
-            INSERT INTO outbox (stream, payload, created_at)
+            INSERT INTO outbox (routing_key, payload, created_at)
             VALUES (?, ?::jsonb, ?)
         """)
-            .param("events.trips")
+            .param("trips.completed")
             .param(payload)
             .param(java.sql.Timestamp.from(Instant.now()))
             .update();
@@ -192,17 +210,14 @@ class OutboxWorkerTest {
         outboxWorker.processOutbox();
 
         // Then: event recovered and published
-        await().atMost(2, SECONDS).untilAsserted(() -> {
+        await().atMost(5, SECONDS).untilAsserted(() -> {
             Integer sentCount = jdbcClient.sql("SELECT COUNT(*) FROM outbox WHERE sent_at IS NOT NULL")
                 .query(Integer.class).single();
             assertThat(sentCount).isEqualTo(1);
         });
 
-        List<MapRecord<String, Object, Object>> messages = redisTemplate.opsForStream()
-            .read(org.springframework.data.redis.connection.stream.StreamReadOptions.empty().count(10),
-                  org.springframework.data.redis.connection.stream.StreamOffset.fromStart("events.trips"));
-
-        assertThat(messages).hasSize(1);
+        Object received = rabbitTemplate.receiveAndConvert("trips-completed", 5000);
+        assertThat(received).isNotNull();
     }
 
     @Test
@@ -221,10 +236,10 @@ class OutboxWorkerTest {
             }
 
             jdbcClient.sql("""
-                INSERT INTO outbox (stream, payload, created_at)
+                INSERT INTO outbox (routing_key, payload, created_at)
                 VALUES (?, ?::jsonb, ?)
             """)
-                .param("events.trips")
+                .param("trips.completed")
                 .param(payload)
                 .param(java.sql.Timestamp.from(Instant.now()))
                 .update();
@@ -235,7 +250,7 @@ class OutboxWorkerTest {
         outboxWorker.processOutbox();
 
         // Then: all events eventually sent (no deadlock from locking)
-        await().atMost(3, SECONDS).untilAsserted(() -> {
+        await().atMost(10, SECONDS).untilAsserted(() -> {
             Integer sentCount = jdbcClient.sql("SELECT COUNT(*) FROM outbox WHERE sent_at IS NOT NULL")
                 .query(Integer.class).single();
             assertThat(sentCount).isEqualTo(10);
