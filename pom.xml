@@ -14,7 +14,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.2</version>
+        <version>3.3.6</version>
         <relativePath/>
     </parent>
 
@@ -128,12 +128,7 @@
                 <version>${testcontainers.version}</version>
                 <scope>test</scope>
             </dependency>
-            <dependency>
-                <groupId>org.testcontainers</groupId>
-                <artifactId>redis</artifactId>
-                <version>${testcontainers.version}</version>
-                <scope>test</scope>
-            </dependency>
+            <!-- RedisContainer is in core testcontainers artifact, no separate redis module -->
         </dependencies>
     </dependencyManagement>
 
