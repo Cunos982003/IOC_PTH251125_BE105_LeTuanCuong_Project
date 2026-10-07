@@ -7,11 +7,12 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
-  data:
-    redis:
-      host: ${REDIS_HOST}
-      port: 6379
-      password: ${REDIS_PASSWORD}
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    virtual-host: ${RABBITMQ_VHOST:/}
 
 payment:
   commission-rate: ${COMMISSION_RATE:20}

@@ -1,7 +1,6 @@
 package com.ridehailing.paymentservice;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.redis.testcontainers.RedisContainer;
 import com.ridehailing.paymentservice.repository.LedgerRepository;
 import com.ridehailing.paymentservice.repository.WalletRepository;
 import com.ridehailing.paymentservice.service.SettlementService;
@@ -10,10 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -32,15 +31,18 @@ class IdempotencyTest {
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
 
     @Container
-    @ServiceConnection
-    static RedisContainer redis = new RedisContainer(DockerImageName.parse("redis:7-alpine"))
-            .withCommand("redis-server", "--requirepass", "testpass");
+    static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
+            .withExposedPorts(5672, 15672)
+            .withStartupTimeout(java.time.Duration.ofSeconds(180));
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.rabbitmq.host", rabbitmq::getHost);
+        registry.add("spring.rabbitmq.port", rabbitmq::getAmqpPort);
+        registry.add("spring.rabbitmq.username", rabbitmq::getAdminUsername);
+        registry.add("spring.rabbitmq.password", rabbitmq::getAdminPassword);
         registry.add("payment.internal-key", () -> "test-key");
         registry.add("payment.commission-rate", () -> "20");
-        registry.add("spring.data.redis.password", () -> "testpass");
     }
 
     @Autowired
@@ -51,9 +53,6 @@ class IdempotencyTest {
 
     @Autowired
     private LedgerRepository ledgerRepository;
-
-    @Autowired
-    private StringRedisTemplate redisTemplate;
 
     @BeforeEach
     void setUp() {

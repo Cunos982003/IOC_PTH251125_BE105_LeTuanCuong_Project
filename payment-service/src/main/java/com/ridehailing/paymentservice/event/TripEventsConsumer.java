@@ -3,202 +3,77 @@ package com.ridehailing.paymentservice.event;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ridehailing.paymentservice.service.SettlementService;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.SmartLifecycle;
-import org.springframework.data.redis.connection.stream.Consumer;
-import org.springframework.data.redis.connection.stream.MapRecord;
-import org.springframework.data.redis.connection.stream.ReadOffset;
-import org.springframework.data.redis.connection.stream.StreamOffset;
-import org.springframework.data.redis.connection.stream.StreamReadOptions;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
-public class TripEventsConsumer implements SmartLifecycle {
+public class TripEventsConsumer {
 
-    private final StringRedisTemplate redisTemplate;
+    private static final Logger log = LoggerFactory.getLogger(TripEventsConsumer.class);
+
     private final SettlementService settlementService;
     private final ObjectMapper objectMapper;
-    private final String consumerGroup;
-    private final String consumerName;
-    private final AtomicBoolean running = new AtomicBoolean(false);
-    private Thread consumerThread;
 
-    public TripEventsConsumer(
-            StringRedisTemplate redisTemplate,
-            SettlementService settlementService,
-            ObjectMapper objectMapper,
-            @Value("${spring.application.name:payment-service}") String appName) {
-        this.redisTemplate = redisTemplate;
+    public TripEventsConsumer(SettlementService settlementService, ObjectMapper objectMapper) {
         this.settlementService = settlementService;
         this.objectMapper = objectMapper;
-        this.consumerGroup = appName;
-        this.consumerName = appName + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
-    @Override
-    public void start() {
-        if (running.compareAndSet(false, true)) {
-            // Retry creating consumer group (Redis might not be ready yet)
-            for (int i = 0; i < 5; i++) {
-                try {
-                    redisTemplate.opsForStream().createGroup("events.trips", ReadOffset.from("0"), consumerGroup);
-                    break;
-                } catch (Exception e) {
-                    // Group might already exist or Redis not ready
-                    if (i == 4) {
-                        System.err.println("Failed to create consumer group after retries: " + e.getMessage());
-                    } else {
-                        try {
-                            Thread.sleep(200);
-                        } catch (InterruptedException ex) {
-                            Thread.currentThread().interrupt();
-                            return;
-                        }
-                    }
-                }
-            }
-
-            processPendingMessages();
-
-            consumerThread = new Thread(this::listenLoop, "trip-events-consumer");
-            consumerThread.start();
-        }
-    }
-
-    @Override
-    public void stop() {
-        if (running.compareAndSet(true, false)) {
-            if (consumerThread != null) {
-                consumerThread.interrupt();
-                try {
-                    consumerThread.join(2000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
-    }
-
-    @Override
-    public boolean isRunning() {
-        return running.get();
-    }
-
-    @Override
-    public int getPhase() {
-        return Integer.MAX_VALUE;
-    }
-
-    @Override
-    public boolean isAutoStartup() {
-        return true;
-    }
-
-    @Override
-    public void stop(Runnable callback) {
-        stop();
-        callback.run();
-    }
-
-    private void processPendingMessages() {
+    @RabbitListener(id = "payment.trips.completed", queues = "payment.trips.completed", autoStartup = "false")
+    public void handleTripCompleted(Message message) {
         try {
-            List<MapRecord<String, Object, Object>> pending = redisTemplate.opsForStream()
-                    .read(Consumer.from(consumerGroup, consumerName),
-                          StreamReadOptions.empty().count(100),
-                          StreamOffset.create("events.trips", ReadOffset.from("0")));
+            String payload = new String(message.getBody());
+            log.debug("Received TripCompleted event: {}", payload);
 
-            if (pending != null) {
-                for (MapRecord<String, Object, Object> record : pending) {
-                    processRecord(record);
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("Error processing pending messages: " + e.getMessage());
-        }
-    }
-
-    private void listenLoop() {
-        while (running.get() && !Thread.currentThread().isInterrupted()) {
-            try {
-                if (!running.get()) break;
-
-                List<MapRecord<String, Object, Object>> records = redisTemplate.opsForStream()
-                        .read(Consumer.from(consumerGroup, consumerName),
-                              StreamReadOptions.empty().count(10).block(Duration.ofSeconds(2)),
-                              StreamOffset.create("events.trips", ReadOffset.lastConsumed()));
-
-                if (!running.get()) break;
-
-                if (records != null) {
-                    for (MapRecord<String, Object, Object> record : records) {
-                        if (!running.get()) break;
-                        processRecord(record);
-                    }
-                }
-            } catch (Exception e) {
-                if (!running.get()) break;
-                if (running.get()) {
-                    System.err.println("Error in consumer loop: " + e.getMessage());
-                }
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
-    }
-
-    private void processRecord(MapRecord<String, Object, Object> record) {
-        try {
-            Object payloadObj = record.getValue().get("payload");
-            if (payloadObj == null) {
-                redisTemplate.opsForStream().acknowledge("events.trips", consumerGroup, record.getId());
-                return;
-            }
-
-            String payload = payloadObj.toString();
             TripEvent event = objectMapper.readValue(payload, TripEvent.class);
 
-            if (event.completed()) {
-                if (event.tripId() != null && event.customerId() != null
-                        && event.driverId() != null && event.fare() != null) {
-                    settlementService.settle(event.tripId(), event.customerId(),
-                                            event.driverId(), event.fare());
-                }
-            } else if (event.cancelled()) {
-                // Just acknowledge, no payment processing
+            if (event.tripId() != null && event.customerId() != null
+                    && event.driverId() != null && event.fare() != null) {
+                settlementService.settle(event.tripId(), event.customerId(),
+                                        event.driverId(), event.fare());
             }
 
-            redisTemplate.opsForStream().acknowledge("events.trips", consumerGroup, record.getId());
+            log.info("Processed TripCompleted event for tripId={}", event.tripId());
 
         } catch (JsonProcessingException e) {
-            // Move to dead letter and acknowledge
-            System.err.println("Failed to parse trip event: " + e.getMessage());
-            moveToDeadLetter(record);
-            redisTemplate.opsForStream().acknowledge("events.trips", consumerGroup, record.getId());
+            log.error("Failed to parse TripCompleted event: {}", e.getMessage());
+            // Invalid JSON - don't requeue, let it go to DLQ after retries
         } catch (IllegalStateException e) {
             // Payment failure (insufficient balance) - acknowledge to avoid retry loop
-            System.err.println("Payment failed: " + e.getMessage());
-            redisTemplate.opsForStream().acknowledge("events.trips", consumerGroup, record.getId());
+            log.error("Payment failed: {}", e.getMessage());
+            // Don't rethrow - ack the message to avoid retry loop
         } catch (Exception e) {
-            // Other processing errors - don't acknowledge, will retry
-            System.err.println("Error processing trip event: " + e.getMessage());
+            log.error("Error processing TripCompleted event: {}", e.getMessage(), e);
+            // Re-throw to trigger retry/DLQ
+            throw e;
         }
     }
 
-    private void moveToDeadLetter(MapRecord<String, Object, Object> record) {
+    @RabbitListener(id = "payment.trips.cancelled", queues = "payment.trips.cancelled", autoStartup = "false")
+    public void handleTripCancelled(Message message) {
         try {
-            redisTemplate.opsForStream().add("events.dead", record.getValue());
+            String payload = new String(message.getBody());
+            log.debug("Received TripCancelled event: {}", payload);
+
+            TripEvent event = objectMapper.readValue(payload, TripEvent.class);
+
+            // Just acknowledge, no payment processing for cancellation
+            // (refund logic would go here if needed)
+
+            log.info("Processed TripCancelled event for tripId={}, reason={}", event.tripId(), event.reason());
+
+        } catch (JsonProcessingException e) {
+            log.error("Failed to parse TripCancelled event: {}", e.getMessage());
+            // Invalid JSON - don't requeue, let it go to DLQ after retries
         } catch (Exception e) {
-            System.err.println("Failed to move to dead letter: " + e.getMessage());
+            log.error("Error processing TripCancelled event: {}", e.getMessage(), e);
+            // Re-throw to trigger retry/DLQ
+            throw e;
         }
     }
 }

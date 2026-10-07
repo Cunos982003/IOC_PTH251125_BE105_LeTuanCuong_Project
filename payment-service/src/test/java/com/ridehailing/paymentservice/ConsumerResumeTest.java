@@ -1,21 +1,22 @@
 package com.ridehailing.paymentservice;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.redis.testcontainers.RedisContainer;
 import com.ridehailing.paymentservice.event.TripEvent;
 import com.ridehailing.paymentservice.repository.WalletRepository;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageBuilder;
+import org.springframework.amqp.core.MessageDeliveryMode;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.data.redis.connection.stream.RecordId;
-import org.springframework.data.redis.connection.stream.StreamRecords;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -28,7 +29,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 @Testcontainers
-@Disabled("Redis connection timing issue in test - consumer works in production")
 class ConsumerResumeTest {
 
     @Container
@@ -36,19 +36,22 @@ class ConsumerResumeTest {
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
 
     @Container
-    @ServiceConnection
-    static RedisContainer redis = new RedisContainer(DockerImageName.parse("redis:7-alpine"))
-            .withCommand("redis-server", "--requirepass", "testpass");
+    static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
+            .withExposedPorts(5672, 15672)
+            .withStartupTimeout(java.time.Duration.ofSeconds(180));
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.rabbitmq.host", rabbitmq::getHost);
+        registry.add("spring.rabbitmq.port", rabbitmq::getAmqpPort);
+        registry.add("spring.rabbitmq.username", rabbitmq::getAdminUsername);
+        registry.add("spring.rabbitmq.password", rabbitmq::getAdminPassword);
         registry.add("payment.internal-key", () -> "test-key");
         registry.add("payment.commission-rate", () -> "20");
-        registry.add("spring.data.redis.password", () -> "testpass");
     }
 
     @Autowired
-    private StringRedisTemplate redisTemplate;
+    private RabbitTemplate rabbitTemplate;
 
     @Autowired
     private WalletRepository walletRepository;
@@ -56,8 +59,25 @@ class ConsumerResumeTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private RabbitListenerEndpointRegistry rabbitListenerEndpointRegistry;
+
     @BeforeEach
     void setUp() {
+        // Declare exchange and queues for testing (normally done by infra definitions.json)
+        rabbitTemplate.execute(channel -> {
+            channel.exchangeDeclare("events", "topic", true);
+            channel.queueDeclare("payment.trips.completed", true, false, false, null);
+            channel.queueBind("payment.trips.completed", "events", "trips.completed");
+            channel.queueDeclare("payment.trips.cancelled", true, false, false, null);
+            channel.queueBind("payment.trips.cancelled", "events", "trips.cancelled");
+            return null;
+        });
+
+        // Start the listeners after queues are declared
+        rabbitListenerEndpointRegistry.getListenerContainer("payment.trips.completed").start();
+        rabbitListenerEndpointRegistry.getListenerContainer("payment.trips.cancelled").start();
+
         // Create test wallets with unique IDs
         walletRepository.createWallet(8001L, 1_000_000L); // customer
         walletRepository.createWallet(8002L, 0L);         // driver
@@ -65,18 +85,6 @@ class ConsumerResumeTest {
 
     @Test
     void consumerProcessesPendingMessages_afterRestart() throws Exception {
-        // Wait for Redis to be ready
-        for (int i = 0; i < 10; i++) {
-            try {
-                redisTemplate.opsForValue().set("test", "ready");
-                redisTemplate.delete("test");
-                break;
-            } catch (Exception e) {
-                if (i == 9) throw e;
-                Thread.sleep(500);
-            }
-        }
-
         UUID tripId = UUID.randomUUID();
 
         // Create TripCompleted event
@@ -87,13 +95,15 @@ class ConsumerResumeTest {
         messageBody.put("eventType", "TripCompleted");
         messageBody.put("payload", payload);
 
-        // Add to stream
-        RecordId recordId = redisTemplate.opsForStream()
-                .add(StreamRecords.newRecord()
-                        .ofStrings(messageBody)
-                        .withStreamKey("events.trips"));
-
-        assertNotNull(recordId);
+        // Add to RabbitMQ
+        Message message = MessageBuilder
+                .withBody(payload.getBytes())
+                .setContentType("application/json")
+                .setDeliveryMode(MessageDeliveryMode.PERSISTENT)
+                .setHeader("type", "trips.completed")
+                .setHeader("eventId", UUID.randomUUID().toString())
+                .build();
+        rabbitTemplate.send("events", "trips.completed", message);
 
         // Wait for consumer to process
         Thread.sleep(3000);
@@ -108,12 +118,14 @@ class ConsumerResumeTest {
         assertEquals(20_000L, platformBalance, "Platform should receive commission (20% of fare)");
 
         // Add another event with same tripId
-        RecordId recordId2 = redisTemplate.opsForStream()
-                .add(StreamRecords.newRecord()
-                        .ofStrings(messageBody)
-                        .withStreamKey("events.trips"));
-
-        assertNotNull(recordId2);
+        Message message2 = MessageBuilder
+                .withBody(payload.getBytes())
+                .setContentType("application/json")
+                .setDeliveryMode(MessageDeliveryMode.PERSISTENT)
+                .setHeader("type", "trips.completed")
+                .setHeader("eventId", UUID.randomUUID().toString())
+                .build();
+        rabbitTemplate.send("events", "trips.completed", message2);
 
         // Wait for processing
         Thread.sleep(2000);

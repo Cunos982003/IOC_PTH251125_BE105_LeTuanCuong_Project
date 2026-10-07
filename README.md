@@ -122,6 +122,7 @@ docker compose logs -f dispatch-service
 
 > Chỉ `api-gateway` (8000) và `ws-gateway` (8001) bind cổng ra host (127.0.0.1).
 > Các service nội bộ chỉ giao tiếp qua mạng Docker, không mở ra ngoài.
+> **RabbitMQ (5672) dùng cho event bus nội bộ** — không expose ra ngoài.
 
 **Kiểm tra sức khỏe:**
 
@@ -211,18 +212,26 @@ flowchart TD
     DispatchService -->|"Calculate Fee"| PricingService["Pricing & Surge Service"]
 
     DispatchService -->|"Find Nearby Drivers"| LocationService
-    DispatchService -->|"Publish Ride Request Event"| EventStream["Redis Streams"]
+    DispatchService -->|"Publish Ride Request Event"| RabbitMQ[("RabbitMQ\nTopic Exchange: events")]
 
-    EventStream -->|"Push Notification to Driver"| WSGateway
-    EventStream -->|"Payment Processing"| PaymentService["Payment & Wallet Service"]
+    RabbitMQ -->|"DriverOffered → ws.offers"| WSGateway
+    RabbitMQ -->|"TripCompleted/TripCancelled → payment.trips.*"| PaymentService["Payment & Wallet Service"]
+    RabbitMQ -->|"TripCompleted/TripCancelled → user.trips"| UserService["User & Driver Profile Service"]
+    RabbitMQ -->|"UserRegistered → payment.users.registered"| PaymentService
+    RabbitMQ -->|"UserRegistered → user.registered"| UserService
 ```
 
 - **Truyền nhận dữ liệu thời gian thực (Real-time Streaming):**
     - **WebSocket:** Giữ kết nối liên tục giữa Driver App và `ws-gateway`.
-- **Event-Driven Architecture (Redis Streams + Consumer Group):**
-    - Khi chuyến đi hoàn thành -> `dispatch-service` bắn event `TripCompletedEvent` vào `events.trips`.
-    - `payment-service` tự động trừ tiền khách và cộng tiền ví tài xế.
-    - `user-service` cập nhật lịch sử chuyến đi qua `events.users`.
+- **Event-Driven Architecture (RabbitMQ Topic Exchange + Outbox Pattern):**
+    - **Exchange:** `events` (topic), có Dead Letter Exchange `events.dlx` cho DLQ.
+    - **Outbox Pattern:** Mỗi service ghi event vào bảng `outbox` cùng transaction DB, sau đó `OutboxWorker` publish lên RabbitMQ với **publisher confirms (correlated)** + `mandatory=true`. Chỉ đánh dấu `sent=true` sau khi broker ACK.
+    - **Consumer:** `@RabbitListener` với `autoStartup="false"`, idempotent (INSERT ... ON CONFLICT DO NOTHING), retry 3 lần (exponential backoff) rồi reject không requeue → DLQ.
+    - **Routing keys / Queues:**
+        - `users.registered` → `user.registered`, `payment.users.registered`
+        - `trips.driver_offered` → `ws.offers`
+        - `trips.completed` / `trips.cancelled` → `payment.trips.completed`, `payment.trips.cancelled`, `user.trips`
+    - **Không còn dùng Redis Streams.** RabbitMQ đảm bảo at-least-once delivery; consumer **bắt buộc idempotent**.
 
 ---
 

@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 class InternalHttpContractTest {
     @org.springframework.context.annotation.Configuration
-    @EnableAutoConfiguration(excludeName = {"org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration", "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration"})
+    @EnableAutoConfiguration(excludeName = {"org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration", "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration", "org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration"})
     @Import({InternalWalletController.class, InternalKeyFilter.class})
     static class Config {
         @org.springframework.context.annotation.Bean
