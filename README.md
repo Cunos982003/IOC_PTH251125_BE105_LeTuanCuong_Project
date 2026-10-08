@@ -1,15 +1,15 @@
-# ĐỀ TÀI 2: HỆ THỐNG ĐẶT XE VÀ GIAO HÀNG THEO YÊU CẦU THEO THỜI GIAN THỰC (RIDE-HAILING & LOGISTICS SYSTEM)
+# Ride-Hailing & Logistics System
 
-[![CI](https://github.com/Cunos982003/ride-hailing/actions/workflows/ci.yml/badge.svg)](https://github.com/Cunos982003/ride-hailing/actions/workflows/ci.yml)
+[![CI](https://github.com/Cunos982003/IOC_PTH251125_BE105_LeTuanCuong_Project/actions/workflows/ci.yml/badge.svg)](https://github.com/Cunos982003/IOC_PTH251125_BE105_LeTuanCuong_Project/actions/workflows/ci.yml)
 
 ## 🚀 Quick Start
 
 ```powershell
 # 1. Clone repository
-git clone https://github.com/YOUR_USERNAME/ride-hailing.git
-cd ride-hailing
+git clone https://github.com/Cunos982003/IOC_PTH251125_BE105_LeTuanCuong_Project.git
+cd IOC_PTH251125_BE105_LeTuanCuong_Project
 
-# 2. Sinh file .env (JWT_SECRET, INTERNAL_KEY, mật khẩu DB/Redis ngẫu nhiên)
+# 2. Sinh file .env (JWT_SECRET, INTERNAL_KEY, RABBITMQ_PASSWORD, mật khẩu DB/Redis)
 .\scripts\gen-env.ps1
 
 # 3. Build + chạy hạ tầng và toàn bộ 7 service
@@ -31,6 +31,7 @@ docker compose ps                          # Tất cả phải "healthy"
 
 ## 📚 Tài liệu
 
+- **[Đề bài gốc](docs/DE-BAI.md)** - Yêu cầu đề tài R1-R16
 - **[Build / Test / CI-CD / Deploy](BUILD-TEST-DEPLOY-GUIDE.md)** - Hướng dẫn chi tiết quy trình phát triển
 - **[CI/CD Setup](CI-SETUP-COMPLETE.md)** - GitHub Actions pipeline
 - **[E2E Testing](tools/e2e/README.md)** - Bộ test end-to-end
@@ -57,8 +58,7 @@ docker compose ps                          # Tất cả phải "healthy"
 .\scripts\gen-env.ps1
 ```
 
-`.env` chứa tối thiểu: `JWT_SECRET`, `INTERNAL_KEY` (bắt buộc — thiếu thì service không khởi động),
-các mật khẩu DB (`*_DB_PASSWORD`), `REDIS_PASSWORD`, `CORS_ALLOWED_ORIGINS`, `IMAGE_TAG`.
+`.env` chứa tối thiểu: `JWT_SECRET`, `INTERNAL_KEY`, `RABBITMQ_PASSWORD` (bắt buộc — thiếu thì service không khởi động), các mật khẩu DB (`*_DB_PASSWORD`), `REDIS_PASSWORD`, `CORS_ALLOWED_ORIGINS`, `IMAGE_TAG`.
 
 ### 1.3. Build (biên dịch)
 
@@ -70,8 +70,7 @@ mvn clean package -DskipTests
 mvn -pl user-service clean package -DskipTests
 ```
 
-> Plugin Enforcer tự chạy mỗi lần build để cấm phụ thuộc cross-module
-> (`com.ridehailing:*`). Vi phạm → build FAIL.
+> Plugin Enforcer tự chạy mỗi lần build để cấm phụ thuộc cross-module (`com.ridehailing:*`). Vi phạm → build FAIL.
 
 ### 1.4. Test
 
@@ -92,8 +91,10 @@ mvn verify -DskipITs=false
 
 ### 1.5. Chạy hệ thống (Docker Compose)
 
+**Profiles có sẵn:** `apps` (7 service), `ha` (replica ws-gateway thứ 2)
+
 ```powershell
-# Chỉ hạ tầng (Postgres + Redis)
+# Chỉ hạ tầng (Postgres + Redis + RabbitMQ)
 docker compose up -d
 
 # Toàn bộ 7 service (kèm hạ tầng), build image tại chỗ
@@ -184,6 +185,7 @@ Xem chi tiết ở [mục 5](#5-hướng-dẫn-triển-khai-lên-server-vps-th�
 ## 3. PHÂN TÍCH KIẾN TRÚC MICROSERVICES
 
 ### 3.1. Danh sách các Microservices chính
+
 1. **API Gateway & WebSocket Gateway:**
     - Quản lý kết nối HTTP REST và kết nối WebSocket persistent hai chiều với ứng dụng tài xế & khách hàng.
 2. **User & Driver Profile Service:**
@@ -191,15 +193,18 @@ Xem chi tiết ở [mục 5](#5-hướng-dẫn-triển-khai-lên-server-vps-th�
 3. **Location & Telemetry Tracking Service (High Throughput Service):**
     - Tiếp nhận stream tọa độ GPS từ ứng dụng tài xế gửi lên theo chu kỳ 3-5 giây/lần.
     - Lưu trữ và cập nhật vị trí mới nhất của tài xế để hỗ trợ truy vấn không gian (Spatial Queries).
+    - **Redis GEO cho truy vấn vị trí thời gian thực; PostGIS: chưa triển khai** (xem F3).
 4. **Trip & Dispatching Matching Service (Core Engine):**
     - Nhận yêu cầu đặt xe từ khách hàng -> Tìm kiếm tài xế phù hợp xung quanh bán kính X km -> Gửi đề nghị nhận chuyến tới tài xế.
-    - Quản lý trạng thái chuyến đi (Requested, Accepted, Arrived, In-Progress, Completed, Cancelled).
+    - Quản lý trạng thái chuyến đi (CREATED, MATCHING, ACCEPTED, PICKING_UP, IN_TRIP, COMPLETED, CANCELLED, NO_DRIVER_FOUND).
 5. **Dynamic Pricing & Surge Fee Service:**
     - Tính toán giá tiền dựa trên khoảng cách, thời gian dự kiến và hệ số nhân nhu cầu (Surge Pricing).
+    - **Haversine × 1.3 làm fallback**; OSRM integration: xem F4.
 6. **Payment & Wallet Service:**
     - Quản lý ví điện tử tài xế, trừ hoa hồng chuyến đi, thanh toán cho khách hàng.
 
 ### 3.2. Sơ đồ kiến trúc & Cơ chế giao tiếp (Inter-Service Communication)
+
 ```mermaid
 flowchart TD
     DriverApp["Driver Mobile App"] -->|"WebSocket Stream"| WSGateway["WebSocket Gateway"]
@@ -226,31 +231,45 @@ flowchart TD
 - **Event-Driven Architecture (RabbitMQ Topic Exchange + Outbox Pattern):**
     - **Exchange:** `events` (topic), có Dead Letter Exchange `events.dlx` cho DLQ.
     - **Outbox Pattern:** Mỗi service ghi event vào bảng `outbox` cùng transaction DB, sau đó `OutboxWorker` publish lên RabbitMQ với **publisher confirms (correlated)** + `mandatory=true`. Chỉ đánh dấu `sent=true` sau khi broker ACK.
-    - **Consumer:** `@RabbitListener` với `autoStartup="false"`, idempotent (INSERT ... ON CONFLICT DO NOTHING), retry 3 lần (exponential backoff) rồi reject không requeue → DLQ.
+    - **Consumer:** `@RabbitListener` với `autoStartup=true` (mặc định), idempotent (INSERT ... ON CONFLICT DO NOTHING), retry 3 lần (exponential backoff) rồi reject không requeue → DLQ.
     - **Routing keys / Queues:**
         - `users.registered` → `user.registered`, `payment.users.registered`
-        - `trips.driver_offered` → `ws.offers`
+        - `trips.offered` → `ws.offers`
         - `trips.completed` / `trips.cancelled` → `payment.trips.completed`, `payment.trips.cancelled`, `user.trips`
-    - **Không còn dùng Redis Streams.** RabbitMQ đảm bảo at-least-once delivery; consumer **bắt buộc idempotent**.
+    - **Không dùng Redis Streams.** RabbitMQ đảm bảo at-least-once delivery; consumer **bắt buộc idempotent**.
+- **Virtual threads:** Đã bật (`spring.threads.virtual.enabled=true` trong mọi `application.yml`).
 
 ---
 
-## 4. HƯỚNG DẪN TÌM HIỂU VÀ PHÂN TÍCH HỆ THỐNG CHO SINH VIÊN
+## 4. BẢNG: ĐỀ YÊU CẦU / ĐÃ LÀM / KHÁC BIỆT
 
-### Giai đoạn 1: Phân tích Kỹ thuật Xử lý Dữ liệu Không gian (Spatial Indexing)
-1. **Nghiên cứu Redis GEO:**
-    - Học cách sử dụng lệnh `GEOADD`, `GEOSEARCH` trong Redis để tìm kiếm tài xế trong bán kính 2km với thời gian phản hồi < 2ms.
-2. **Quản lý trạng thái kết nối WebSocket:**
-    - Giải bài toán khi server WebSocket bị rớt mạng hoặc khi chạy nhiều instance WebSocket Gateway (dùng Redis Pub/Sub để broadcast tin nhắn giữa các instance WebSocket).
+| Đề yêu cầu (R1-R16) | Đã làm | Khác biệt & Lý do |
+|---|---|---|
+| **R1** Real-time < 500ms | ✅ WebSocket + Redis Pub/Sub | Đo thực tế qua `tools/evidence/latency_e2e.py` |
+| **R2** Matching Accuracy | ✅ MatchingService + disp:lock | Test `match_accuracy.py` xác nhận tài xế gần nhất nhận offer trước |
+| **R3** 7 Microservices | ✅ 7 service độc lập | Không module common, mỗi service tự đủ |
+| **R4** Customer Web App | ✅ `web/index.html` (Leaflet) | Single file, no build, deploy qua Nginx `/var/www/ride` |
+| **R5** Redis GEOSEARCH < 2ms | ✅ `GEOSEARCH` Lua script | Benchmark `bench_geo.py` (Redis local & qua HTTP) |
+| **R6** WS Failover 2 replica | ✅ Profile `ha`, reconnect backoff | Test `failover_ws.ps1` đo thời gian reconnect |
+| **R7** State Machine | ✅ TripStatus enum + transition | Có CANCELLED, NO_DRIVER_FOUND |
+| **R8** Surge Pricing | ✅ Geohash grid, demand/supply | Đề ghi ngược supply/demand → code dùng demand=yêu cầu, supply=tài xế rảnh |
+| **R9** PostGIS | ❌ Chưa | Redis GEO cho real-time; PostGIS migration: F3 |
+| **R10** OSRM | ❌ Chưa | Dùng Haversine × 1.3; OSRM integration: F4 |
+| **R11** Payment & Wallet | ✅ WalletService, Settlement | Ví điện tử, hoa hồng 20% mặc định |
+| **R12** Outbox + RabbitMQ | ✅ OutboxWorker, publisher confirm | DLX `events.dlx`, retry 3 lần + DLQ |
+| **R13** Internal API | ✅ X-Internal-Key, timeout 500ms-2s | Không retry vô hạn |
+| **R14** CI/CD | ✅ Test/contracts xanh, build image | Push image GHCR, deploy SSH: F6 |
+| **R15** Load Test | ✅ `tools/loadtest/drivers.py` | 100 driver ảo, đo latency |
+| **R16** Báo cáo & Demo | ✅ `docs/BAO-CAO.md`, `docs/DEMO-SCRIPT.md` | F7 |
 
-### Giai đoạn 2: Thiết kế Matching Engine & State Machine
-1. **Thiết kế Máy trạng thái Chuyến xe (State Machine):**
-    - Vẽ và cài đặt luồng chuyển trạng thái nghiêm ngặt cho chuyến xe: `CREATED` -> `MATCHING` -> `ACCEPTED` -> `PICKING_UP` -> `IN_TRIP` -> `COMPLETED`.
-    - Đảm bảo tránh tình trạng 2 khách hàng đặt cùng 1 tài xế tại 1 thời điểm (Concurrency Control / Atomic Lock).
-
-### Giai đoạn 3: Phân tích Tính toán cước giá động (Surge Pricing)
-1. **Thu thập Metrics:**
-    - Đếm số lượng yêu cầu tạo chuyến (Supply) vs số tài xế rảnh (Demand) trong cùng một geohash (ô lưới địa lý) theo từng khung giờ.
+**Tóm tắt khác biệt chính:**
+- **Broker:** RabbitMQ (topic exchange `events` + DLX) thay vì Apache Kafka + Zookeeper
+- **Trạng thái Busy:** Lưu ở `location-service` (Redis `loc:driver:{id}`) thay vì user-service
+- **Supply/Demand:** Đề bài ghi ngược; code dùng `demand = số yêu cầu đặt xe`, `supply = số tài xế rảnh`
+- **OSRM:** Chưa tích hợp, dùng Haversine × 1.3 fallback
+- **PostGIS:** Chưa triển khai, dùng Redis GEO cho real-time
+- **Thanh toán thẻ:** Chưa có (chỉ ví nội bộ)
+- **HA:** Chỉ `ws-gateway` có 2 replica (profile `ha`)
 
 ---
 
@@ -271,8 +290,8 @@ sudo usermod -aG docker $USER
 # Đăng nhập lại để áp dụng group docker
 
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/ride-hailing.git
-cd ride-hailing
+git clone https://github.com/Cunos982003/IOC_PTH251125_BE105_LeTuanCuong_Project.git
+cd IOC_PTH251125_BE105_LeTuanCuong_Project
 ```
 
 ### Step 3: Cấu hình secret (.env)
@@ -282,13 +301,14 @@ Trên VPS dùng Linux, tạo `.env` thủ công (đừng commit lên git):
 cat > .env << 'EOF'
 JWT_SECRET=$(openssl rand -base64 48)
 INTERNAL_KEY=$(openssl rand -hex 32)
+RABBITMQ_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 USER_DB_PASSWORD=$(openssl rand -hex 24)
 LOCATION_DB_PASSWORD=$(openssl rand -hex 24)
 DISPATCH_DB_PASSWORD=$(openssl rand -hex 24)
 PAYMENT_DB_PASSWORD=$(openssl rand -hex 24)
 REDIS_PASSWORD=$(openssl rand -hex 24)
-CORS_ALLOWED_ORIGINS=https://ride-api.yourdomain.com
+CORS_ALLOWED_ORIGINS=https://ridehailing.duckdns.org
 IMAGE_TAG=latest
 EOF
 chmod 600 .env
@@ -296,7 +316,12 @@ chmod 600 .env
 
 > Lưu ý: mật khẩu Postgres/Redis chỉ có tác dụng khi volume còn trống (lần init đầu).
 
-### Step 4: Chạy hệ thống
+### Step 4: Tạo thư mục web app (chạy 1 lần)
+```bash
+sudo mkdir -p /var/www/ride && sudo chown deploy:deploy /var/www/ride
+```
+
+### Step 5: Chạy hệ thống
 ```bash
 docker compose --profile apps up -d --build
 
@@ -306,57 +331,51 @@ curl http://localhost:8001/api/v1/health
 docker compose ps
 ```
 
-### Step 5: Cấu hình Nginx Reverse Proxy cho WebSocket
-Cấu hình Nginx trên VPS để proxy cả HTTP REST và WebSocket (Upgrade HTTP header):
+### Step 6: Cấu hình Nginx Reverse Proxy cho WebSocket + Web App
+Cấu hình Nginx trên VPS (`/etc/nginx/sites-available/ride-api`) — **không ghi đè file certbot**, chỉ thay thế khối `location /`:
 
 ```nginx
-server {
-    server_name ride-api.yourdomain.com;
+# Health check
+location /health {
+    access_log off;
+    return 200 "OK\n";
+    add_header Content-Type text/plain;
+}
 
-    # HTTP REST APIs
-    location /api/v1/ {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-
-    # Real-time WebSocket connection
-    location /ws/ {
-        proxy_pass http://localhost:8001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "Upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400s; # Giữ kết nối lâu dài không bị timeout
-    }
+# Serve customer web app
+location / {
+    root /var/www/ride;
+    index index.html;
+    try_files $uri $uri/ =404;
 }
 ```
 
-### Step 6: Triển khai SSL & HTTPS với Certbot
+Sau đó:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### Step 7: Triển khai SSL & HTTPS với Certbot
 ```bash
 sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d ride-api.yourdomain.com
-sudo certbot renew --dry-run   # Kiểm tra gia hạn tự động
+sudo certbot --nginx -d ridehailing.duckdns.org
+sudo certbot renew --dry-run
 ```
 
-### Step 7: Cập nhật dịch vụ (Rolling Update)
+### Step 8: Cập nhật dịch vụ (Rolling Update)
 ```bash
-# Build lại và cập nhật từng service, tránh downtime
 docker compose --profile apps up -d --no-deps --build user-service
-docker compose ps   # Kiểm tra health
+docker compose ps
 ```
 
-### Step 8: Deploy tự động bằng script
+### Step 9: Deploy tự động bằng script
 ```bash
-# Sinh .env nếu thiếu → pull code → build → chờ tất cả healthy
+# Sinh .env nếu thiếu → pull code → pull image GHCR → cập nhật lần lượt từng service
 ./scripts/deploy.sh
 ```
 
-### Step 9: Tự động hoá CI/CD (GitHub Actions)
-Pipeline CI (`.github/workflows/ci.yml`) chạy test, kiểm tra hợp đồng và build 7 image
-(`push: false`, chỉ verify build). Kịch bản deploy tự động qua SSH (build image → push GHCR →
-`ssh` VPS pull + up) được mô tả ở [BUILD-TEST-DEPLOY-GUIDE.md](BUILD-TEST-DEPLOY-GUIDE.md) mục 5.4.
+### Step 10: Tự động hoá CI/CD (GitHub Actions)
+Pipeline CI (`.github/workflows/ci.yml`) chạy test, kiểm tra hợp đồng và build 7 image (`push: false`, chỉ verify build). Job deploy tự động qua SSH được mô tả ở [BUILD-TEST-DEPLOY-GUIDE.md](BUILD-TEST-DEPLOY-GUIDE.md) và F6.
 
 ---
 
