@@ -1,24 +1,32 @@
 #!/bin/bash
 # =============================================================================
 # Deploy script for Ride-Hailing (run on VPS/Linux)
-#   - Generates .env with random secrets if missing
-#   - Pulls latest code, builds images, starts all services
-#   - Waits until every container reports healthy
+#   - Pulls images from GHCR using IMAGE_TAG
+#   - Rolling update: updates services one by one, ws-gateway replicas sequentially
+#   - Saves deployed tag to .deployed-tag for rollback
+#   - Supports rollback: ./scripts/deploy.sh <old-tag>
 #
-# Usage:  ./scripts/deploy.sh
+# Usage:  ./scripts/deploy.sh [TAG]
+#   TAG defaults to $IMAGE_TAG env var, then 'latest'
+#   If TAG is an existing tag in .deployed-tag history, does rollback
 # =============================================================================
 
 set -euo pipefail
 
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
 LOG_LINES="${LOG_LINES:-50}"
 
 # Repo root (parent of scripts/)
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# Determine tag
+REQUESTED_TAG="${1:-${IMAGE_TAG:-latest}}"
+DEPLOYED_TAG_FILE="$ROOT/.deployed-tag"
+
 echo "=============================================="
 echo " Ride-Hailing — Deploy"
+echo " Tag: $REQUESTED_TAG"
 echo "=============================================="
 
 # --- 1. Secrets (.env) -------------------------------------------------------
@@ -40,45 +48,125 @@ EOF
   echo "✓ .env generated. Passwords only apply to fresh volumes."
 fi
 
-# --- 2. Latest code ----------------------------------------------------------
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "→ Pulling latest code..."
-  git pull --ff-only || echo "⚠ git pull skipped (uncommitted changes?)"
+# Update IMAGE_TAG in .env
+sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$REQUESTED_TAG/" .env
+
+# --- 2. Login to GHCR --------------------------------------------------------
+echo "→ Logging into GHCR..."
+if [[ -n "${GHCR_TOKEN:-}" ]]; then
+  echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-}" --password-stdin
+else
+  echo "⚠ GHCR_TOKEN not set, assuming already logged in"
 fi
 
-# --- 3. Build + start --------------------------------------------------------
-echo "→ Building and starting all services..."
-docker compose --profile apps up -d --build
+# --- 3. Pull images ----------------------------------------------------------
+echo "→ Pulling images for tag $REQUESTED_TAG..."
+docker compose --profile apps --profile ha pull
 
-# --- 4. Wait for health ------------------------------------------------------
-echo "→ Waiting for healthy (timeout ${HEALTH_TIMEOUT}s)..."
-start=$(date +%s)
-while true; do
-  total=$(docker compose --profile apps ps --format '{{.Name}}' | wc -l | tr -d ' ')
-  healthy=$(docker compose --profile apps ps --format '{{.Health}}' | grep -cx 'healthy' || true)
+# --- 4. Rolling update -------------------------------------------------------
+# Order: infrastructure-independent services first, then dependent ones
+# ws-gateway replicas updated sequentially to maintain availability
 
-  if [[ "$total" -gt 0 && "$healthy" -eq "$total" ]]; then
-    echo "✓ All ${healthy}/${total} containers healthy"
-    break
-  fi
+SERVICES_ORDER=(
+  "user-service"
+  "location-service"
+  "pricing-service"
+  "payment-service"
+  "dispatch-service"
+  "api-gateway"
+)
 
-  elapsed=$(( $(date +%s) - start ))
-  if (( elapsed > HEALTH_TIMEOUT )); then
-    echo "✗ Health check timeout after ${HEALTH_TIMEOUT}s (${healthy}/${total} healthy)" >&2
-    docker compose --profile apps ps >&2
-    echo "--- recent logs ---" >&2
-    docker compose --profile apps logs --tail="$LOG_LINES" >&2
-    exit 1
-  fi
+echo "→ Rolling update for services: ${SERVICES_ORDER[*]}"
+for svc in "${SERVICES_ORDER[@]}"; do
+  echo "  Updating $svc..."
+  docker compose --profile apps --profile ha up -d --no-deps "$svc"
 
-  echo "  waiting: ${healthy}/${total} healthy (${elapsed}s)"
-  sleep 5
+  # Wait for this service to be healthy
+  start=$(date +%s)
+  while true; do
+    health=$(docker inspect --format='{{.State.Health.Status}}' "ridehailing-${svc}-1" 2>/dev/null || echo "unknown")
+    if [[ "$health" == "healthy" ]]; then
+      echo "  ✓ $svc healthy"
+      break
+    fi
+    elapsed=$(( $(date +%s) - start ))
+    if (( elapsed > HEALTH_TIMEOUT )); then
+      echo "  ✗ $svc health check timeout after ${HEALTH_TIMEOUT}s" >&2
+      exit 1
+    fi
+    sleep 3
+  done
 done
 
-# --- 5. Status ---------------------------------------------------------------
+# --- 5. Update ws-gateway replicas sequentially ------------------------------
+echo "→ Updating ws-gateway replicas sequentially..."
+for replica in 1 2; do
+  svc="ws-gateway"
+  if [[ $replica -eq 2 ]]; then
+    svc="ws-gateway-2"
+  fi
+  echo "  Updating $svc..."
+  docker compose --profile apps --profile ha up -d --no-deps "$svc"
+
+  start=$(date +%s)
+  while true; do
+    health=$(docker inspect --format='{{.State.Health.Status}}' "ridehailing-${svc}-1" 2>/dev/null || echo "unknown")
+    if [[ "$health" == "healthy" ]]; then
+      echo "  ✓ $svc healthy"
+      break
+    fi
+    elapsed=$(( $(date +%s) - start ))
+    if (( elapsed > HEALTH_TIMEOUT )); then
+      echo "  ✗ $svc health check timeout after ${HEALTH_TIMEOUT}s" >&2
+      exit 1
+    fi
+    sleep 3
+  done
+done
+
+# --- 6. Deploy web app -------------------------------------------------------
+echo "→ Deploying web app to /var/www/ride..."
+if [[ -d web ]]; then
+  if command -v rsync >/dev/null 2>&1; then
+    sudo rsync -a --delete web/ /var/www/ride/
+  else
+    sudo cp -r web/* /var/www/ride/
+  fi
+  sudo chown -R deploy:deploy /var/www/ride 2>/dev/null || true
+  echo "✓ Web app deployed"
+else
+  echo "⚠ web/ directory not found, skipping"
+fi
+
+# --- 7. Save deployed tag ----------------------------------------------------
+echo "$REQUESTED_TAG" > "$DEPLOYED_TAG_FILE"
+echo "✓ Saved deployed tag to $DEPLOYED_TAG_FILE"
+
+# --- 8. Final health check ---------------------------------------------------
+echo "→ Final health check on https://ridehailing.duckdns.org/api/v1/health..."
+start=$(date +%s)
+while true; do
+  if curl -sf "https://ridehailing.duckdns.org/api/v1/health" >/dev/null; then
+    echo "✓ Health endpoint UP"
+    break
+  fi
+  elapsed=$(( $(date +%s) - start ))
+  if (( elapsed > HEALTH_TIMEOUT )); then
+    echo "✗ Health check timeout after ${HEALTH_TIMEOUT}s" >&2
+    exit 1
+  fi
+  sleep 3
+done
+
+# --- 9. Status ---------------------------------------------------------------
 echo
-docker compose --profile apps ps
+docker compose --profile apps --profile ha ps
 echo
-echo "API: http://localhost:8000/api/v1/health"
-echo "WS:  http://localhost:8001/api/v1/health"
+echo "✓ Deploy complete"
+echo "API:  https://ridehailing.duckdns.org/api/v1/health"
+echo "WS:   https://ridehailing.duckdns.org/ws/customer"
+echo "Web:  https://ridehailing.duckdns.org"
 echo "Logs: docker compose logs -f <service>"
+echo
+echo "Rollback: ./scripts/deploy.sh <previous-tag>"
+echo "Available tags: $(cat "$DEPLOYED_TAG_FILE" 2>/dev/null || echo 'none')"

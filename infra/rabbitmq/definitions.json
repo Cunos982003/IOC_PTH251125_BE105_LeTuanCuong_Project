@@ -3,13 +3,28 @@
   "rabbitmq_version": "3.13.7",
   "product_version": "3.13.7",
   "product_name": "RabbitMQ",
-  "users": [],
   "vhosts": [
     {
       "name": "/"
     }
   ],
-  "permissions": [],
+  "users": [
+    {
+      "name": "ride",
+      "password_hash": "Zdzlb3uRcXNiqa9RagNHrGZyibxuVktXGf8MuQSsNdMffg2f",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    }
+  ],
+  "permissions": [
+    {
+      "user": "ride",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
   "topic_permissions": [],
   "parameters": [],
   "global_parameters": [
@@ -21,96 +36,56 @@
   "policies": [],
   "queues": [
     {
-      "name": "user.events.registered",
+      "name": "user.trips",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
       "arguments": {
         "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "user.events.registered.dlq"
+        "x-dead-letter-routing-key": "user.trips.dlq"
       }
     },
     {
-      "name": "user.events.updated",
+      "name": "payment.users.registered",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
       "arguments": {
         "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "user.events.updated.dlq"
+        "x-dead-letter-routing-key": "payment.users.registered.dlq"
       }
     },
     {
-      "name": "user.events.driver_approved",
+      "name": "payment.trips.completed",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
       "arguments": {
         "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "user.events.driver_approved.dlq"
+        "x-dead-letter-routing-key": "payment.trips.completed.dlq"
       }
     },
     {
-      "name": "trip.events.requested",
+      "name": "payment.trips.cancelled",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
       "arguments": {
         "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "trip.events.requested.dlq"
+        "x-dead-letter-routing-key": "payment.trips.cancelled.dlq"
       }
     },
     {
-      "name": "trip.events.accepted",
+      "name": "ws.offers",
       "vhost": "/",
       "durable": true,
       "auto_delete": false,
       "arguments": {
         "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "trip.events.accepted.dlq"
-      }
-    },
-    {
-      "name": "trip.events.started",
-      "vhost": "/",
-      "durable": true,
-      "auto_delete": false,
-      "arguments": {
-        "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "trip.events.started.dlq"
-      }
-    },
-    {
-      "name": "trip.events.completed",
-      "vhost": "/",
-      "durable": true,
-      "auto_delete": false,
-      "arguments": {
-        "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "trip.events.completed.dlq"
-      }
-    },
-    {
-      "name": "trip.events.cancelled",
-      "vhost": "/",
-      "durable": true,
-      "auto_delete": false,
-      "arguments": {
-        "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "trip.events.cancelled.dlq"
-      }
-    },
-    {
-      "name": "trip.events.offered",
-      "vhost": "/",
-      "durable": true,
-      "auto_delete": false,
-      "arguments": {
-        "x-dead-letter-exchange": "events.dlx",
-        "x-dead-letter-routing-key": "trip.events.offered.dlq"
+        "x-dead-letter-routing-key": "ws.offers.dlq"
       }
     }
-  ],
+    ],
   "exchanges": [
     {
       "name": "events",
@@ -135,55 +110,7 @@
     {
       "source": "events",
       "vhost": "/",
-      "destination": "user.events.registered",
-      "destination_type": "queue",
-      "routing_key": "users.registered",
-      "arguments": {}
-    },
-    {
-      "source": "events",
-      "vhost": "/",
-      "destination": "user.events.updated",
-      "destination_type": "queue",
-      "routing_key": "users.updated",
-      "arguments": {}
-    },
-    {
-      "source": "events",
-      "vhost": "/",
-      "destination": "user.events.driver_approved",
-      "destination_type": "queue",
-      "routing_key": "users.driver_approved",
-      "arguments": {}
-    },
-    {
-      "source": "events",
-      "vhost": "/",
-      "destination": "trip.events.requested",
-      "destination_type": "queue",
-      "routing_key": "trips.requested",
-      "arguments": {}
-    },
-    {
-      "source": "events",
-      "vhost": "/",
-      "destination": "trip.events.accepted",
-      "destination_type": "queue",
-      "routing_key": "trips.accepted",
-      "arguments": {}
-    },
-    {
-      "source": "events",
-      "vhost": "/",
-      "destination": "trip.events.started",
-      "destination_type": "queue",
-      "routing_key": "trips.started",
-      "arguments": {}
-    },
-    {
-      "source": "events",
-      "vhost": "/",
-      "destination": "trip.events.completed",
+      "destination": "user.trips",
       "destination_type": "queue",
       "routing_key": "trips.completed",
       "arguments": {}
@@ -191,7 +118,7 @@
     {
       "source": "events",
       "vhost": "/",
-      "destination": "trip.events.cancelled",
+      "destination": "user.trips",
       "destination_type": "queue",
       "routing_key": "trips.cancelled",
       "arguments": {}
@@ -199,18 +126,74 @@
     {
       "source": "events",
       "vhost": "/",
-      "destination": "trip.events.offered",
+      "destination": "payment.users.registered",
+      "destination_type": "queue",
+      "routing_key": "users.registered",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "payment.trips.completed",
+      "destination_type": "queue",
+      "routing_key": "trips.completed",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "payment.trips.cancelled",
+      "destination_type": "queue",
+      "routing_key": "trips.cancelled",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
+      "destination": "ws.offers",
       "destination_type": "queue",
       "routing_key": "trips.offered",
+      "arguments": {}
+    },
+        {
+      "source": "events.dlx",
+      "vhost": "/",
+      "destination": "user.trips",
+      "destination_type": "queue",
+      "routing_key": "user.trips.dlq",
       "arguments": {}
     },
     {
       "source": "events.dlx",
       "vhost": "/",
-      "destination": "user.events.registered",
+      "destination": "payment.users.registered",
       "destination_type": "queue",
-      "routing_key": "user.events.registered.dlq",
+      "routing_key": "payment.users.registered.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "events.dlx",
+      "vhost": "/",
+      "destination": "payment.trips.completed",
+      "destination_type": "queue",
+      "routing_key": "payment.trips.completed.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "events.dlx",
+      "vhost": "/",
+      "destination": "payment.trips.cancelled",
+      "destination_type": "queue",
+      "routing_key": "payment.trips.cancelled.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "events.dlx",
+      "vhost": "/",
+      "destination": "ws.offers",
+      "destination_type": "queue",
+      "routing_key": "ws.offers.dlq",
       "arguments": {}
     }
-  ]
+    ]
 }

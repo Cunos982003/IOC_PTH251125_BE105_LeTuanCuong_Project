@@ -25,7 +25,7 @@ public class WalletRepository {
 
     @Transactional
     public void createWallet(long userId, long initialBalance) {
-        jdbcClient.sql("INSERT INTO wallets (user_id, balance, updated_at) VALUES (?, ?, now()) ON CONFLICT (user_id) DO NOTHING")
+        jdbcClient.sql("INSERT INTO wallets (user_id, balance, updated_at) VALUES (?, ?, now()) ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance, updated_at = now()")
                 .param(userId)
                 .param(initialBalance)
                 .update();

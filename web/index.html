@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ride-Hailing Customer App</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+  .container { display: flex; height: 100vh; }
+  .sidebar { width: 320px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow-y: auto; }
+  .map-container { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; }
+  .header { padding: 16px; border-bottom: 1px solid #eee; }
+  .header h1 { font-size: 18px; color: #333; }
+  .section { padding: 16px; border-bottom: 1px solid #eee; }
+  .section-title { font-size: 14px; font-weight: 600; color: #666; margin-bottom: 12px; text-transform: uppercase; }
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 13px; color: #666; margin-bottom: 4px; }
+  .form-group input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+  .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: #0066cc; color: white; }
+  .btn-secondary { background: #f0f0f0; color: #333; }
+  .btn-danger { background: #dc3545; color: white; }
+  .btn-success { background: #28a745; color: white; }
+  .status-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .status-connected { background: #d4edda; color: #155724; }
+  .status-connecting { background: #fff3cd; color: #856404; }
+  .status-disconnected { background: #f8d7da; color: #721c24; }
+  .status-authenticated { background: #cce5ff; color: #004085; }
+  .ride-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; }
+  .ride-info-item { background: #f8f9fa; padding: 8px; border-radius: 6px; }
+  .ride-info-label { color: #666; font-size: 11px; text-transform: uppercase; }
+  .ride-info-value { font-weight: 500; color: #333; }
+  .timeline { display: flex; flex-direction: column; gap: 8px; }
+  .timeline-item { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 8px; background: #f8f9fa; }
+  .timeline-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #ddd; flex-shrink: 0; }
+  .timeline-dot.active { background: #0066cc; border-color: #0066cc; }
+  .timeline-dot.completed { background: #28a745; border-color: #28a745; }
+  .timeline-dot.cancelled { background: #dc3545; border-color: #dc3545; }
+  .timeline-text { flex: 1; font-size: 13px; }
+  .timeline-time { font-size: 11px; color: #999; }
+  .quote-result { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 13px; }
+  .quote-row { display: flex; justify-content: space-between; margin: 4px 0; }
+  .latency-info { background: #f8f9fa; padding: 12px; border-radius: 8px; font-size: 12px; }
+  .latency-row { display: flex; justify-content: space-between; margin: 2px 0; }
+  .driver-marker-info { font-size: 11px; color: #666; margin-top: 4px; }
+  .hidden { display: none !important; }
+  .error-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #dc3545; color: white; padding: 12px 24px; border-radius: 8px; z-index: 1000; animation: slideUp 0.3s; }
+  @keyframes slideUp { from { opacity: 0; transform: translateX(-50%) translateY(20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+  .marker-pickup { background: #0066cc; border: 3px solid white; }
+  .marker-dropoff { background: #dc3545; border: 3px solid white; }
+  .leaflet-popup-content-wrapper { border-radius: 8px; }
+  .leaflet-popup-content { margin: 8px 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <aside class="sidebar">
+    <div class="header">
+      <h1>🚗 Ride-Hailing</h1>
+    </div>
+
+    <!-- Auth Section -->
+    <div class="section" id="auth-section">
+      <div class="section-title">Đăng nhập / Đăng ký</div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="email-input" placeholder="customer@example.com">
+      </div>
+      <div class="form-group">
+        <label>Mật khẩu</label>
+        <input type="password" id="password-input" placeholder="••••••••">
+      </div>
+      <button class="btn btn-primary" id="login-btn">Đăng nhập</button>
+      <button class="btn btn-secondary" id="register-btn" style="margin-top: 8px;">Đăng ký</button>
+      <div id="auth-status" class="status-badge status-disconnected" style="margin-top: 8px; width: 100%; text-align: center;">Chưa đăng nhập</div>
+    </div>
+
+    <!-- Wallet Section -->
+    <div class="section hidden" id="wallet-section">
+      <div class="section-title">Ví điện tử</div>
+      <div class="ride-info">
+        <div class="ride-info-item">
+          <div class="ride-info-label">Số dư</div>
+          <div class="ride-info-value" id="wallet-balance">0đ</div>
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="refresh-wallet-btn" style="margin-top: 8px;">Làm mới</button>
+    </div>
+
+    <!-- Map Controls Section -->
+    <div class="section hidden" id="map-controls-section">
+      <div class="section-title">Đặt xe</div>
+      <div class="form-group">
+        <label>Điểm đón</label>
+        <div id="pickup-display" class="ride-info-value">Chưa chọn</div>
+      </div>
+      <div class="form-group">
+        <label>Điểm đến</label>
+        <div id="dropoff-display" class="ride-info-value">Chưa chọn</div>
+      </div>
+      <button class="btn btn-secondary" id="clear-map-btn" style="margin-bottom: 12px;">Xóa chọn</button>
+      <button class="btn btn-primary" id="quote-btn">Báo giá</button>
+      <div id="quote-result" class="quote-result hidden"></div>
+      <button class="btn btn-success hidden" id="book-btn" style="margin-top: 12px;">Đặt xe</button>
+      <button class="btn btn-danger hidden" id="cancel-btn" style="margin-top: 8px;">Hủy chuyến</button>
+    </div>
+
+    <!-- Ride Status Section -->
+    <div class="section hidden" id="ride-status-section">
+      <div class="section-title">Trạng thái chuyến</div>
+      <div class="timeline" id="timeline"></div>
+      <div id="ride-error" class="ride-info-value" style="color: #dc3545; margin-top: 8px;"></div>
+    </div>
+
+    <!-- WebSocket Status -->
+    <div class="section">
+      <div class="section-title">Kết nối WebSocket</div>
+      <div id="ws-status" class="status-badge status-disconnected">Đang ngắt kết nối</div>
+      <div class="driver-marker-info" id="ws-detail"></div>
+    </div>
+
+    <!-- Latency Section -->
+    <div class="section hidden" id="latency-section">
+      <div class="section-title">Độ trễ (ước lượng)</div>
+      <div class="latency-info" id="latency-display">
+        <div class="latency-row"><span>p50</span><span id="latency-p50">-</span></div>
+        <div class="latency-row"><span>p95</span><span id="latency-p95">-</span></div>
+        <div class="latency-row"><span>Mẫu</span><span id="latency-count">0</span></div>
+        <div style="margin-top: 8px; font-size: 10px; color: #999;">Lưu ý: ước lượng do đồng hồ trình duyệt và server có thể lệch</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="map-container">
+    <div id="map"></div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+// ==================== UTILITIES ====================
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function showToast(message) {
+  const existing = document.querySelector('.error-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'error-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+function formatCurrency(vnd) {
+  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(vnd);
+}
+
+function formatTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function percentile(arr, p) {
+  if (!arr.length) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const idx = Math.ceil(p / 100 * sorted.length) - 1;
+  return sorted[Math.max(0, idx)];
+}
+
+// ==================== STATE ====================
+const state = {
+  token: null,
+  ws: null,
+  wsUrl: null,
+  reconnectAttempt: 0,
+  maxReconnectDelay: 30000,
+  baseReconnectDelay: 1000,
+  rideId: null,
+  idempotencyKey: null,
+  pickup: null,
+  dropoff: null,
+  pickupMarker: null,
+  dropoffMarker: null,
+  driverMarker: null,
+  rideStatus: null,
+  latencySamples: [],
+  map: null,
+  wsAuthenticated: false
+};
+
+const API_BASE = '/api/v1';
+
+// ==================== MAP INIT ====================
+function initMap() {
+  state.map = L.map('map').setView([21.0285, 105.8542], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(state.map);
+
+  state.map.on('click', (e) => handleMapClick(e.latlng));
+}
+
+function handleMapClick(latlng) {
+  if (!state.pickup) {
+    state.pickup = { lat: latlng.lat, lng: latlng.lng };
+    state.pickupMarker = L.circleMarker(latlng, { radius: 10, color: '#0066cc', fillColor: '#0066cc', fillOpacity: 1, weight: 3, className: 'marker-pickup' })
+      .addTo(state.map)
+      .bindPopup('Điểm đón').openPopup();
+    updateMapControls();
+  } else if (!state.dropoff) {
+    state.dropoff = { lat: latlng.lat, lng: latlng.lng };
+    state.dropoffMarker = L.circleMarker(latlng, { radius: 10, color: '#dc3545', fillColor: '#dc3545', fillOpacity: 1, weight: 3, className: 'marker-dropoff' })
+      .addTo(state.map)
+      .bindPopup('Điểm đến').openPopup();
+    updateMapControls();
+    state.map.fitBounds(L.latLngBounds([state.pickup, state.dropoff]).pad(0.2));
+  }
+}
+
+function clearMapSelection() {
+  if (state.pickupMarker) { state.map.removeLayer(state.pickupMarker); state.pickupMarker = null; }
+  if (state.dropoffMarker) { state.map.removeLayer(state.dropoffMarker); state.dropoffMarker = null; }
+  if (state.driverMarker) { state.map.removeLayer(state.driverMarker); state.driverMarker = null; }
+  state.pickup = null;
+  state.dropoff = null;
+  updateMapControls();
+  document.getElementById('quote-result').classList.add('hidden');
+  document.getElementById('book-btn').classList.add('hidden');
+}
+
+function updateMapControls() {
+  const hasPickup = !!state.pickup;
+  const hasDropoff = !!state.dropoff;
+  document.getElementById('pickup-display').textContent = hasPickup ? `${state.pickup.lat.toFixed(5)}, ${state.pickup.lng.toFixed(5)}` : 'Chưa chọn';
+  document.getElementById('dropoff-display').textContent = hasDropoff ? `${state.dropoff.lat.toFixed(5)}, ${state.dropoff.lng.toFixed(5)}` : 'Chưa chọn';
+  document.getElementById('clear-map-btn').classList.toggle('hidden', !hasPickup && !hasDropoff);
+  document.getElementById('quote-btn').classList.toggle('hidden', !(hasPickup && hasDropoff));
+  document.getElementById('book-btn').classList.add('hidden');
+  document.getElementById('cancel-btn').classList.add('hidden');
+}
+
+// ==================== AUTH ====================
+async function apiRequest(endpoint, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+  if (state.idempotencyKey) headers['Idempotency-Key'] = state.idempotencyKey;
+
+  const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+  return data;
+}
+
+async function login() {
+  const email = document.getElementById('email-input').value.trim();
+  const password = document.getElementById('password-input').value;
+  if (!email || !password) return showToast('Nhập email và mật khẩu');
+
+  try {
+    const data = await apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    state.token = data.token;
+    document.getElementById('auth-status').textContent = 'Đã đăng nhập';
+    document.getElementById('auth-status').className = 'status-badge status-authenticated';
+    document.getElementById('auth-section').classList.add('hidden');
+    document.getElementById('wallet-section').classList.remove('hidden');
+    document.getElementById('map-controls-section').classList.remove('hidden');
+    document.getElementById('ride-status-section').classList.remove('hidden');
+    document.getElementById('latency-section').classList.remove('hidden');
+    await refreshWallet();
+    connectWebSocket();
+  } catch (e) { showToast(e.message); }
+}
+
+async function register() {
+  const email = document.getElementById('email-input').value.trim();
+  const password = document.getElementById('password-input').value;
+  if (!email || !password) return showToast('Nhập email và mật khẩu');
+
+  try {
+    await apiRequest('/auth/register', { method: 'POST', body: JSON.stringify({ email, password, fullName: 'Customer', role: 'CUSTOMER' }) });
+    showToast('Đăng ký thành công, đang đăng nhập...');
+    await login();
+  } catch (e) { showToast(e.message); }
+}
+
+async function refreshWallet() {
+  try {
+    const data = await apiRequest('/wallet');
+    document.getElementById('wallet-balance').textContent = formatCurrency(data.balance);
+  } catch (e) { console.error('Wallet refresh failed:', e); }
+}
+
+// ==================== WEBSOCKET ====================
+function connectWebSocket() {
+  if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) return;
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  state.wsUrl = `${protocol}//${location.host}/ws/customer`;
+
+  updateWsStatus('connecting', 'Đang kết nối...');
+
+  state.ws = new WebSocket(state.wsUrl);
+
+  state.ws.onopen = () => {
+    state.reconnectAttempt = 0;
+    updateWsStatus('connected', 'Đã kết nối');
+    // Send auth immediately
+    if (state.token) {
+      state.ws.send(JSON.stringify({ t: 'auth', token: state.token }));
+    }
+  };
+
+  state.ws.onmessage = (event) => handleWsMessage(event.data);
+
+  state.ws.onclose = () => {
+    updateWsStatus('disconnected', 'Đã ngắt kết nối');
+    state.wsAuthenticated = false;
+    scheduleReconnect();
+  };
+
+  state.ws.onerror = () => {
+    updateWsStatus('disconnected', 'Lỗi kết nối');
+  };
+}
+
+function scheduleReconnect() {
+  if (state.reconnectAttempt >= 10) return; // Max 10 attempts
+  const delay = Math.min(state.baseReconnectDelay * Math.pow(2, state.reconnectAttempt), state.maxReconnectDelay);
+  const jitter = delay * 0.3 * (Math.random() * 2 - 1); // ±30%
+  const finalDelay = Math.max(100, Math.round(delay + jitter));
+  state.reconnectAttempt++;
+  document.getElementById('ws-detail').textContent = `Thử lại sau ${(finalDelay/1000).toFixed(1)}s (lần ${state.reconnectAttempt})`;
+  setTimeout(connectWebSocket, finalDelay);
+}
+
+function updateWsStatus(status, detail) {
+  const el = document.getElementById('ws-status');
+  el.textContent = detail;
+  el.className = 'status-badge ' + (status === 'connected' ? 'status-connected' : status === 'connecting' ? 'status-connecting' : 'status-disconnected');
+  if (status === 'connected' && state.wsAuthenticated) el.className = 'status-badge status-authenticated';
+}
+
+function handleWsMessage(data) {
+  let msg;
+  try { msg = JSON.parse(data); } catch { return; }
+
+  if (msg.t === 'auth_ok') {
+    state.wsAuthenticated = true;
+    updateWsStatus('connected', 'Đã xác thực');
+    // Subscribe to ride updates if we have a ride
+    if (state.rideId) {
+      state.ws.send(JSON.stringify({ t: 'subscribe', rideId: state.rideId }));
+    }
+    return;
+  }
+
+  if (msg.t === 'driver_location') {
+    handleDriverLocation(msg);
+    return;
+  }
+
+  if (msg.t === 'trip_update') {
+    handleTripUpdate(msg);
+    return;
+  }
+
+  if (msg.t === 'offer') {
+    // Offer received - could show notification
+    return;
+  }
+}
+
+function handleDriverLocation(msg) {
+  const sentAt = msg.sent_at;
+  if (sentAt) {
+    const latency = (Date.now() / 1000) - sentAt;
+    state.latencySamples.push(latency);
+    if (state.latencySamples.length > 50) state.latencySamples.shift();
+    updateLatencyDisplay();
+  }
+
+  const pos = [msg.lat, msg.lng];
+  if (!state.driverMarker) {
+    state.driverMarker = L.circleMarker(pos, { radius: 12, color: '#28a745', fillColor: '#28a745', fillOpacity: 1, weight: 3 })
+      .addTo(state.map)
+      .bindPopup('Tài xế').openPopup();
+  } else {
+    state.driverMarker.setLatLng(pos);
+  }
+  if (state.rideId && state.rideStatus !== 'COMPLETED' && state.rideStatus !== 'CANCELLED') {
+    state.map.setView(pos, state.map.getZoom());
+  }
+}
+
+function updateLatencyDisplay() {
+  const p50 = percentile(state.latencySamples, 50);
+  const p95 = percentile(state.latencySamples, 95);
+  document.getElementById('latency-p50').textContent = p50 !== null ? `${(p50 * 1000).toFixed(0)}ms` : '-';
+  document.getElementById('latency-p95').textContent = p95 !== null ? `${(p95 * 1000).toFixed(0)}ms` : '-';
+  document.getElementById('latency-count').textContent = state.latencySamples.length;
+}
+
+function handleTripUpdate(msg) {
+  state.rideStatus = msg.status;
+  updateTimeline(msg.status, msg.updated_at);
+
+  if (msg.status === 'COMPLETED') {
+    document.getElementById('book-btn').classList.add('hidden');
+    document.getElementById('cancel-btn').classList.add('hidden');
+    refreshWallet();
+    if (state.driverMarker) { state.map.removeLayer(state.driverMarker); state.driverMarker = null; }
+  } else if (msg.status === 'CANCELLED' || msg.status === 'NO_DRIVER_FOUND') {
+    document.getElementById('book-btn').classList.add('hidden');
+    document.getElementById('cancel-btn').classList.add('hidden');
+    document.getElementById('ride-error').textContent = msg.status === 'NO_DRIVER_FOUND' ? 'Không tìm thấy tài xế' : 'Chuyến đã bị hủy';
+    if (state.driverMarker) { state.map.removeLayer(state.driverMarker); state.driverMarker = null; }
+  } else if (msg.status === 'ACCEPTED' || msg.status === 'PICKING_UP' || msg.status === 'IN_TRIP') {
+    document.getElementById('book-btn').classList.add('hidden');
+    document.getElementById('cancel-btn').classList.remove('hidden');
+  }
+}
+
+function updateTimeline(status, updatedAt) {
+  const statuses = ['CREATED', 'MATCHING', 'ACCEPTED', 'PICKING_UP', 'IN_TRIP', 'COMPLETED'];
+  const container = document.getElementById('timeline');
+  container.innerHTML = '';
+
+  statuses.forEach((s, i) => {
+    const item = document.createElement('div');
+    item.className = 'timeline-item';
+    const currentIdx = statuses.indexOf(state.rideStatus);
+    const isActive = currentIdx >= 0 && i === currentIdx;
+    const isCompleted = currentIdx >= 0 && i < currentIdx;
+    const isCancelled = state.rideStatus === 'CANCELLED' || state.rideStatus === 'NO_DRIVER_FOUND';
+
+    let dotClass = 'timeline-dot';
+    if (isCancelled && s === 'CANCELLED') dotClass += ' cancelled';
+    else if (isActive) dotClass += ' active';
+    else if (isCompleted) dotClass += ' completed';
+
+    item.innerHTML = `
+      <div class="${dotClass}"></div>
+      <div class="timeline-text">${escapeHtml(s)}</div>
+      <div class="timeline-time">${i === currentIdx ? formatTime(updatedAt) : (isCompleted ? '✓' : '')}</div>
+    `;
+    container.appendChild(item);
+  });
+
+  // Add cancelled/no driver if applicable
+  if (state.rideStatus === 'CANCELLED' || state.rideStatus === 'NO_DRIVER_FOUND') {
+    const item = document.createElement('div');
+    item.className = 'timeline-item';
+    item.innerHTML = `
+      <div class="timeline-dot cancelled"></div>
+      <div class="timeline-text">${escapeHtml(state.rideStatus)}</div>
+      <div class="timeline-time">${formatTime(updatedAt)}</div>
+    `;
+    container.appendChild(item);
+  }
+}
+
+// ==================== RIDE OPERATIONS ====================
+async function requestQuote() {
+  if (!state.pickup || !state.dropoff) return;
+  try {
+    const data = await apiRequest('/quote', {
+      method: 'POST',
+      body: JSON.stringify({
+        pickup_lat: state.pickup.lat,
+        pickup_lng: state.pickup.lng,
+        dropoff_lat: state.dropoff.lat,
+        dropoff_lng: state.dropoff.lng
+      })
+    });
+    const el = document.getElementById('quote-result');
+    el.innerHTML = `
+      <div class="quote-row"><span>Cước cơ bản</span><span>${formatCurrency(data.fare)}</span></div>
+      <div class="quote-row"><span>Hệ số Surge</span><span>x${data.surge_multiplier || 1.0}</span></div>
+      <div class="quote-row"><span><strong>Tổng ước tính</strong></span><span><strong>${formatCurrency(data.total_fare || data.fare)}</strong></span></div>
+    `;
+    el.classList.remove('hidden');
+    document.getElementById('book-btn').classList.remove('hidden');
+    state.idempotencyKey = crypto.randomUUID();
+  } catch (e) { showToast(e.message); }
+}
+
+async function bookRide() {
+  if (!state.pickup || !state.dropoff) return;
+  try {
+    const data = await apiRequest('/rides', {
+      method: 'POST',
+      body: JSON.stringify({
+        pickup_lat: state.pickup.lat,
+        pickup_lng: state.pickup.lng,
+        dropoff_lat: state.dropoff.lat,
+        dropoff_lng: state.dropoff.lng
+      })
+    });
+    state.rideId = data.ride_id;
+    state.rideStatus = 'CREATED';
+    document.getElementById('book-btn').classList.add('hidden');
+    document.getElementById('cancel-btn').classList.remove('hidden');
+    updateTimeline('CREATED', new Date().toISOString());
+
+    // Subscribe to ride updates
+    if (state.ws && state.ws.readyState === WebSocket.OPEN && state.wsAuthenticated) {
+      state.ws.send(JSON.stringify({ t: 'subscribe', rideId: state.rideId }));
+    }
+  } catch (e) { showToast(e.message); }
+}
+
+async function cancelRide() {
+  if (!state.rideId) return;
+  try {
+    await apiRequest(`/rides/${state.rideId}/cancel`, { method: 'POST' });
+    // Status will update via WebSocket
+  } catch (e) { showToast(e.message); }
+}
+
+// ==================== INIT ====================
+document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('register-btn').addEventListener('click', register);
+document.getElementById('clear-map-btn').addEventListener('click', clearMapSelection);
+document.getElementById('quote-btn').addEventListener('click', requestQuote);
+document.getElementById('book-btn').addEventListener('click', bookRide);
+document.getElementById('cancel-btn').addEventListener('click', cancelRide);
+document.getElementById('refresh-wallet-btn').addEventListener('click', refreshWallet);
+
+// Enter key support
+document.getElementById('password-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') login(); });
+
+initMap();
+</script>
+</body>
+</html>

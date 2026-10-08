@@ -155,7 +155,7 @@
                     <version>3.3.0</version>
                     <configuration>
                         <useModulePath>false</useModulePath>
-                        <argLine>-Dnet.bytebuddy.experimental=true</argLine>
+                        <argLine>-Dnet.bytebuddy.experimental=true -Dtestcontainers.use-hostname-resolution=true</argLine>
                     </configuration>
                 </plugin>
 
@@ -166,6 +166,7 @@
                     <version>3.3.0</version>
                     <configuration>
                         <useModulePath>false</useModulePath>
+                        <argLine>-Dtestcontainers.use-hostname-resolution=true</argLine>
                     </configuration>
                     <executions>
                         <execution>

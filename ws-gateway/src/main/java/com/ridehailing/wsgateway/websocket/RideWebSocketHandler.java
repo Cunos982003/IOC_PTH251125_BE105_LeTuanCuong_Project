@@ -89,15 +89,20 @@ public class RideWebSocketHandler extends TextWebSocketHandler {
 
         try {
             WsMessage msg = objectMapper.readValue(payload, WsMessage.class);
+            log.info("Received WS message type: {} for session: {}", msg.getType(), session != null ? session.getUserId() : "null");
 
             if ("auth".equals(msg.getType())) {
                 handleAuth(wsSession, payload);
             } else if (session == null) {
+                log.warn("No session for message type: {}, closing", msg.getType());
                 closeWithReason(wsSession, CloseStatus.POLICY_VIOLATION, "Not authenticated");
             } else {
                 session.updateActivity();
                 switch (msg.getType()) {
-                    case "location" -> handleLocation(wsSession, session, payload);
+                    case "location" -> {
+                        log.info("Handling location message for user: {}", session.getUserId());
+                        handleLocation(wsSession, session, payload);
+                    }
                     case "accept" -> handleAccept(wsSession, session, payload);
                     default -> sendError(wsSession, "UNKNOWN_TYPE", "Unknown message type");
                 }
@@ -152,7 +157,9 @@ public class RideWebSocketHandler extends TextWebSocketHandler {
 
         try {
             LocationMessage locMsg = objectMapper.readValue(payload, LocationMessage.class);
+            log.info("Parsed location for driver {}: lat={}, lng={}, sentAt={}", session.getUserId(), locMsg.getLat(), locMsg.getLng(), locMsg.getSentAt());
             locationBatcher.enqueue(session.getUserId(), locMsg.getLat(), locMsg.getLng(), locMsg.getSentAt());
+            log.info("Enqueued location for driver {}", session.getUserId());
         } catch (Exception e) {
             log.warn("Invalid location message: {}", e.getMessage());
             sendError(wsSession, "INVALID_LOCATION", "Invalid location data");

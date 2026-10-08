@@ -127,6 +127,7 @@ jobs:
   images:
     name: Build Image - ${{ matrix.module }}
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
 
     strategy:
       fail-fast: false
@@ -157,9 +158,46 @@ jobs:
           file: ./Dockerfile
           build-args: |
             MODULE=${{ matrix.module }}
-          push: false
+          push: true
           tags: |
             ghcr.io/${{ env.OWNER_LC }}/ride-hailing-${{ matrix.module }}:${{ github.sha }}
             ghcr.io/${{ env.OWNER_LC }}/ride-hailing-${{ matrix.module }}:latest
           cache-from: type=gha,scope=${{ matrix.module }}
           cache-to: type=gha,mode=max,scope=${{ matrix.module }}
+
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [test, contracts, images]
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          known_hosts: ${{ secrets.VPS_HOST_KEY }}
+          script: |
+            cd ~/ride-hailing
+            IMAGE_TAG=${{ github.sha }} ./scripts/deploy.sh
+
+      - name: Verify health endpoint
+        run: |
+          for i in {1..24}; do
+            if curl -sf "https://ridehailing.duckdns.org/api/v1/health"; then
+              echo "✓ Health endpoint UP"
+              exit 0
+            fi
+            echo "Waiting for health... ($i/24)"
+            sleep 5
+          done
+          echo "✗ Health check timeout after 120s" >&2
+          exit 1

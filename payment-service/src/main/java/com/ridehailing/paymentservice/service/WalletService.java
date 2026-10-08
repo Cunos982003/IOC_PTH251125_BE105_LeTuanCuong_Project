@@ -15,7 +15,10 @@ public class WalletService {
 
     public long getBalance(long userId) {
         return walletRepository.findBalance(userId)
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found for user " + userId));
+                .orElseGet(() -> {
+                    createWallet(userId, 0L);
+                    return 0L;
+                });
     }
 
     @Transactional

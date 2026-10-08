@@ -25,6 +25,10 @@ x-app-env: &app-env
   JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70
   TZ: UTC
   INTERNAL_KEY: ${INTERNAL_KEY:?Chưa đặt INTERNAL_KEY trong .env}
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+  RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-ride}
+  RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-ride-local-only}
 
 # Cấu hình chung của mọi service ứng dụng (profile apps)
 x-app: &app
@@ -188,10 +192,16 @@ services:
       DB_PASSWORD: ${PAYMENT_DB_PASSWORD:-payment-local-only}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis-local-only}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-ride}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-ride-local-only}
+      RABBITMQ_VHOST: /
     mem_limit: 384m
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
 
   # --- ws-gateway: WebSocket hai chiều với app tài xế và khách -----------------
   # ws-gateway gọi dispatch-service lúc chạy (accept) nhưng KHÔNG khai báo
@@ -208,11 +218,16 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Chưa đặt JWT_SECRET trong .env}
       LOCATION_SERVICE_URL: http://location-service:8082
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-ride}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-ride-local-only}
     ports: ["127.0.0.1:8001:8001"]
     mem_limit: 512m
     depends_on:
       redis: {condition: service_healthy}
       location-service: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
 
   # --- dispatch-service: chuyến xe, state machine, ghép chuyến -----------------
   dispatch-service:
@@ -280,11 +295,16 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Chưa đặt JWT_SECRET trong .env}
       LOCATION_SERVICE_URL: http://location-service:8082
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-ride}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-ride-local-only}
     ports: ["127.0.0.1:8011:8011"]
     mem_limit: 512m
     depends_on:
       redis: {condition: service_healthy}
       location-service: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
 
 volumes:
   postgres-data:

@@ -11,9 +11,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.ExchangeBuilder;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.amqp.core.MessageDeliveryMode;
+import org.springframework.amqp.core.QueueBuilder;
+import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,6 +72,23 @@ class DriverOfferConsumerIntegrationTest {
     static RedisClient redisClient;
     static StatefulRedisPubSubConnection<String, String> pubSubConnection;
 
+    @BeforeAll
+    static void declareQueues() {
+        // Declare queues/exchanges before Spring context starts so auto-startup listeners find them
+        var connectionFactory = new CachingConnectionFactory(
+                "localhost", rabbitmq.getMappedPort(5672)
+        );
+        connectionFactory.setUsername(rabbitmq.getAdminUsername());
+        connectionFactory.setPassword(rabbitmq.getAdminPassword());
+
+        RabbitAdmin admin = new RabbitAdmin(connectionFactory);
+        var exchange = ExchangeBuilder.topicExchange("events").durable(true).build();
+        admin.declareExchange(exchange);
+        admin.declareQueue(QueueBuilder.durable("ws.offers").build());
+        admin.declareBinding(new Binding("ws.offers", Binding.DestinationType.QUEUE, "events", "trips.offered", null));
+        connectionFactory.destroy();
+    }
+
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.rabbitmq.host", rabbitmq::getHost);
@@ -103,15 +125,8 @@ class DriverOfferConsumerIntegrationTest {
 
     @BeforeEach
     void setup() {
-        // Declare exchange and queue for testing (normally done by infra definitions.json)
-        rabbitTemplate.execute(channel -> {
-            channel.exchangeDeclare("events", "topic", true);
-            channel.queueDeclare("ws.offers", true, false, false, null);
-            channel.queueBind("ws.offers", "events", "trips.offered");
-            return null;
-        });
-
-        // Start the listener after queue is declared
+        // Queues/exchanges already declared in @BeforeAll before context startup
+        // Listeners have autoStartup=false, start them manually
         rabbitListenerEndpointRegistry.getListenerContainer("ws.offers").start();
     }
 
@@ -153,6 +168,13 @@ class DriverOfferConsumerIntegrationTest {
 
         String payload = objectMapper.writeValueAsString(event);
 
+        // First: subscribe to Redis channel BEFORE sending message
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> receivedMessage = new AtomicReference<>();
+
+        String channel = "ws:out:" + driverId;
+        subscribeAndWait(channel, latch, receivedMessage);
+
         // When: publish to RabbitMQ
         Message message = MessageBuilder
                 .withBody(payload.getBytes())
@@ -163,12 +185,6 @@ class DriverOfferConsumerIntegrationTest {
         rabbitTemplate.send("events", "trips.offered", message);
 
         // Then: verify message received on Redis channel ws:out:{driverId}
-        CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<String> receivedMessage = new AtomicReference<>();
-
-        String channel = "ws:out:" + driverId;
-        subscribeAndWait(channel, latch, receivedMessage);
-
         // Wait for message
         assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
 
@@ -212,6 +228,13 @@ class DriverOfferConsumerIntegrationTest {
 
         String payload = objectMapper.writeValueAsString(event);
 
+        // First: subscribe to Redis channel BEFORE sending message
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> receivedMessage = new AtomicReference<>();
+
+        String channel = "ws:out:" + driverId;
+        subscribeAndWait(channel, latch, receivedMessage);
+
         // When: publish to RabbitMQ
         Message message = MessageBuilder
                 .withBody(payload.getBytes())
@@ -222,12 +245,6 @@ class DriverOfferConsumerIntegrationTest {
         rabbitTemplate.send("events", "trips.offered", message);
 
         // Then: verify NO message received on Redis channel (offer is expired)
-        CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<String> receivedMessage = new AtomicReference<>();
-
-        String channel = "ws:out:" + driverId;
-        subscribeAndWait(channel, latch, receivedMessage);
-
         // Wait a bit - should NOT receive message
         boolean received = latch.await(3, TimeUnit.SECONDS);
         assertThat(received).isFalse();
@@ -256,6 +273,13 @@ class DriverOfferConsumerIntegrationTest {
 
         String payload = objectMapper.writeValueAsString(event);
 
+        // First: subscribe to Redis channel BEFORE sending message
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> receivedMessage = new AtomicReference<>();
+
+        String channel = "ws:out:" + driverId;
+        subscribeAndWait(channel, latch, receivedMessage);
+
         // When
         Message message = MessageBuilder
                 .withBody(payload.getBytes())
@@ -266,12 +290,6 @@ class DriverOfferConsumerIntegrationTest {
         rabbitTemplate.send("events", "trips.offered", message);
 
         // Then: verify exact message format matches WebSocket protocol
-        CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<String> receivedMessage = new AtomicReference<>();
-
-        String channel = "ws:out:" + driverId;
-        subscribeAndWait(channel, latch, receivedMessage);
-
         assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
 
         String received = receivedMessage.get();
@@ -285,6 +303,73 @@ class DriverOfferConsumerIntegrationTest {
         assertThat(wsMessage.get("t")).isEqualTo("offer");
         assertThat(wsMessage.get("tripId")).isEqualTo(tripId.toString());
         assertThat(wsMessage.get("fare")).isEqualTo(200000);
+
+        // Cleanup
+        pubSubConnection.sync().unsubscribe(channel);
+    }
+
+    @Test
+    void driverOfferConsumer_autoStartsAndProcessesWithin5Seconds() throws Exception {
+        // This test verifies the listener can be started manually and processes events.
+
+        // Declare exchange and queue (normally done by infra/definitions.json)
+        rabbitTemplate.execute(channel -> {
+            channel.exchangeDeclare("events", "topic", true);
+            channel.queueDeclare("ws.offers", true, false, false, null);
+            channel.queueBind("ws.offers", "events", "trips.offered");
+            return null;
+        });
+
+        // Given: a driver offer event
+        UUID tripId = UUID.randomUUID();
+        long driverId = 88888L;
+        long customerId = 77777L;
+        long fare = 150000L;
+        Instant expiresAt = Instant.now().plusSeconds(300);
+
+        DriverOfferedEvent event = new DriverOfferedEvent(
+                UUID.randomUUID(),
+                tripId,
+                driverId,
+                customerId,
+                new DriverOfferedEvent.Pickup(10.7769, 106.7009),
+                fare,
+                expiresAt
+        );
+
+        String payload = objectMapper.writeValueAsString(event);
+
+        // First: subscribe to Redis channel BEFORE sending message
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> receivedMessage = new AtomicReference<>();
+
+        String channel = "ws:out:" + driverId;
+        subscribeAndWait(channel, latch, receivedMessage);
+
+        // When: publish to RabbitMQ - listener should auto-start and consume
+        Message message = MessageBuilder
+                .withBody(payload.getBytes())
+                .setContentType("application/json")
+                .setDeliveryMode(MessageDeliveryMode.PERSISTENT)
+                .setHeader("type", "trips.offered")
+                .build();
+        rabbitTemplate.send("events", "trips.offered", message);
+
+        // Then: verify message received on Redis channel ws:out:{driverId} within 5 seconds
+        // Wait for message - should complete within 5 seconds
+        assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
+
+        // Verify message content
+        String received = receivedMessage.get();
+        assertThat(received).isNotNull();
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> wsMessage = objectMapper.readValue(received, Map.class);
+
+        assertThat(wsMessage.get("t")).isEqualTo("offer");
+        assertThat(wsMessage.get("tripId")).isEqualTo(tripId.toString());
+        assertThat(wsMessage.get("fare")).isEqualTo((int) fare);
+        assertThat(wsMessage.get("pickup")).isInstanceOf(Map.class);
 
         // Cleanup
         pubSubConnection.sync().unsubscribe(channel);

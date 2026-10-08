@@ -10,6 +10,11 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Binding;
+import org.springframework.amqp.core.ExchangeBuilder;
+import org.springframework.amqp.core.QueueBuilder;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +46,11 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 @org.springframework.test.context.ActiveProfiles({"infra", "test"})
 class EventIntegrationTest {
 
+    // Force Testcontainers to use host.docker.internal on Windows
+    static {
+        System.setProperty("testcontainers.use-hostname-resolution", "true");
+    }
+
     private static final Logger log = LoggerFactory.getLogger(EventIntegrationTest.class);
 
     @Container
@@ -53,6 +63,33 @@ class EventIntegrationTest {
     static RabbitMQContainer rabbitmq = new RabbitMQContainer("rabbitmq:3.13-management-alpine")
             .withExposedPorts(5672, 15672)
             .withStartupTimeout(java.time.Duration.ofSeconds(180));
+
+    @BeforeAll
+    static void declareQueues() {
+        // Declare queues/exchanges before Spring context starts so auto-startup listeners find them
+        var connectionFactory = new org.springframework.amqp.rabbit.connection.CachingConnectionFactory(
+                "localhost", rabbitmq.getMappedPort(5672)
+        );
+        connectionFactory.setUsername(rabbitmq.getAdminUsername());
+        connectionFactory.setPassword(rabbitmq.getAdminPassword());
+
+        RabbitAdmin admin = new RabbitAdmin(connectionFactory);
+        var exchange = ExchangeBuilder.topicExchange("events").durable(true).build();
+        // Queue for trip events (completed, cancelled)
+        var tripQueue = QueueBuilder.durable("user.trips").build();
+        // Queue for user registered events
+        var registeredQueue = QueueBuilder.durable("user.registered").build();
+        admin.declareExchange(exchange);
+        admin.declareQueue(tripQueue);
+        admin.declareQueue(registeredQueue);
+        admin.declareBinding(new org.springframework.amqp.core.Binding(
+                "user.trips", Binding.DestinationType.QUEUE, "events", "trips.completed", null));
+        admin.declareBinding(new org.springframework.amqp.core.Binding(
+                "user.trips", Binding.DestinationType.QUEUE, "events", "trips.cancelled", null));
+        admin.declareBinding(new org.springframework.amqp.core.Binding(
+                "user.registered", Binding.DestinationType.QUEUE, "events", "users.registered", null));
+        connectionFactory.destroy();
+    }
 
     static {
         // Ensure containers start
@@ -285,5 +322,53 @@ class EventIntegrationTest {
         assertThat(record.get("status")).isEqualTo("CANCELLED");
         assertThat(record.get("fare")).isEqualTo(0L);
         assertThat(record.get("driverId")).isNull();
+    }
+
+    @Test
+    void tripEventListener_autoStartsAndProcessesWithin5Seconds() throws Exception {
+        // This test verifies the listener starts automatically (autoStartup=true)
+        // and processes events without manual start() call.
+        // Queues/exchanges must be declared before context loads, so we declare them here.
+
+        UUID tripId = UUID.randomUUID();
+        Long customerId = 200L;
+        Long driverId = 300L;
+        Long fare = 75000L;
+        Instant completedAt = Instant.now();
+
+        TripCompletedEvent event = new TripCompletedEvent(
+                UUID.randomUUID(),
+                tripId,
+                customerId,
+                driverId,
+                fare,
+                completedAt
+        );
+
+        String payload = objectMapper.writeValueAsString(event);
+
+        // Declare exchange and queue (normally done by infra/definitions.json)
+        rabbitTemplate.execute(channel -> {
+            channel.exchangeDeclare("events", "topic", true);
+            channel.queueDeclare("user.trips", true, false, false, null);
+            channel.queueBind("user.trips", "events", "trips.completed");
+            channel.queueBind("user.trips", "events", "trips.cancelled");
+            return null;
+        });
+
+        // Send event directly to RabbitMQ - listener should auto-start and consume
+        org.springframework.amqp.core.Message message = org.springframework.amqp.core.MessageBuilder
+                .withBody(payload.getBytes())
+                .setContentType("application/json")
+                .setDeliveryMode(org.springframework.amqp.core.MessageDeliveryMode.PERSISTENT)
+                .setHeader("type", "trips.completed")
+                .build();
+        rabbitTemplate.send("events", "trips.completed", message);
+
+        // Wait for consumer to process - should complete within 5 seconds
+        await().atMost(5, SECONDS).untilAsserted(() -> {
+            Long count = tripHistoryRepository.countByTripId(tripId);
+            assertThat(count).isEqualTo(1);
+        });
     }
 }

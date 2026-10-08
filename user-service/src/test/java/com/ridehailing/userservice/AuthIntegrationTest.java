@@ -22,6 +22,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -36,11 +37,15 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
 @org.springframework.test.context.ActiveProfiles({"infra", "test"})
-@TestPropertySource(properties = "server.port=8081")
 class AuthIntegrationTest {
+
+    // Force Testcontainers to use host.docker.internal on Windows
+    static {
+        System.setProperty("testcontainers.use-hostname-resolution", "true");
+    }
 
     @BeforeAll
     static void disableAuthenticator() {
