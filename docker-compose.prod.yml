@@ -1,54 +1,102 @@
 version: '3.9'
 
 services:
-  # Infrastructure
+  # Reverse Proxy & SSL Termination
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/certs:/etc/nginx/certs:ro
+    depends_on:
+      - api-gateway
+      - ws-gateway
+    restart: unless-stopped
+    networks:
+      - ride-hailing-network
+
+  # Infrastructure - External managed services recommended for production
+  # Keep local for simplicity, but consider: RDS, ElastiCache, CloudAMQP
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres_password
-    ports:
-      - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./infra/postgres/01-create-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh
+      - ./infra/postgres/01-create-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - ride-hailing-network
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD}
-    ports:
-      - "6379:6379"
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - ride-hailing-network
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
-    ports:
-      - "5672:5672"
-      - "15672:15672"
     volumes:
-      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
-      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - ride-hailing-network
 
-  # Services (profile: apps)
+  # Services - Pull from GHCR, no build
   user-service:
-    build:
-      context: .
-      args:
-        MODULE: user-service
     image: ghcr.io/cunos982003/ride-hailing-user-service:${IMAGE_TAG:-latest}
-    ports:
-      - "8081:8081"
     environment:
       SERVER_PORT: 8081
       DB_URL: jdbc:postgresql://postgres:5432/user
       DB_USERNAME: user_app
       DB_PASSWORD: user_password
       REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -60,28 +108,32 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-    depends_on:
-      - postgres
-      - redis
-      - rabbitmq
-    profiles:
-      - apps
+      SPRING_PROFILES_ACTIVE: prod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - ride-hailing-network
 
   location-service:
-    build:
-      context: .
-      args:
-        MODULE: location-service
     image: ghcr.io/cunos982003/ride-hailing-location-service:${IMAGE_TAG:-latest}
-    ports:
-      - "8082:8082"
     environment:
       SERVER_PORT: 8082
       DB_URL: jdbc:postgresql://postgres:5432/location
       DB_USERNAME: location_app
       DB_PASSWORD: location_password
       REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -93,28 +145,32 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-    depends_on:
-      - postgres
-      - redis
-      - rabbitmq
-    profiles:
-      - apps
+      SPRING_PROFILES_ACTIVE: prod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - ride-hailing-network
 
   dispatch-service:
-    build:
-      context: .
-      args:
-        MODULE: dispatch-service
     image: ghcr.io/cunos982003/ride-hailing-dispatch-service:${IMAGE_TAG:-latest}
-    ports:
-      - "8083:8083"
     environment:
       SERVER_PORT: 8083
       DB_URL: jdbc:postgresql://postgres:5432/dispatch
       DB_USERNAME: dispatch_app
       DB_PASSWORD: dispatch_password
       REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -126,25 +182,29 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-    depends_on:
-      - postgres
-      - redis
-      - rabbitmq
-    profiles:
-      - apps
+      SPRING_PROFILES_ACTIVE: prod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - ride-hailing-network
 
   pricing-service:
-    build:
-      context: .
-      args:
-        MODULE: pricing-service
     image: ghcr.io/cunos982003/ride-hailing-pricing-service:${IMAGE_TAG:-latest}
-    ports:
-      - "8084:8084"
     environment:
       SERVER_PORT: 8084
       REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -156,27 +216,32 @@ services:
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-    depends_on:
-      - redis
-      - rabbitmq
-    profiles:
-      - apps
+      SPRING_PROFILES_ACTIVE: prod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8084/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - ride-hailing-network
 
   payment-service:
-    build:
-      context: .
-      args:
-        MODULE: payment-service
     image: ghcr.io/cunos982003/ride-hailing-payment-service:${IMAGE_TAG:-latest}
-    ports:
-      - "8085:8085"
     environment:
       SERVER_PORT: 8085
       DB_URL: jdbc:postgresql://postgres:5432/payment
       DB_USERNAME: payment_app
       DB_PASSWORD: payment_password
       REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -188,25 +253,29 @@ services:
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
       PRICING_SERVICE_URL: http://pricing-service:8084
       WS_GATEWAY_URL: http://ws-gateway:8001
-    depends_on:
-      - postgres
-      - redis
-      - rabbitmq
-    profiles:
-      - apps
+      SPRING_PROFILES_ACTIVE: prod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8085/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    networks:
+      - ride-hailing-network
 
   ws-gateway:
-    build:
-      context: .
-      args:
-        MODULE: ws-gateway
     image: ghcr.io/cunos982003/ride-hailing-ws-gateway:${IMAGE_TAG:-latest}
-    ports:
-      - "8001:8001"
     environment:
       SERVER_PORT: 8001
       REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -218,24 +287,29 @@ services:
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
-    depends_on:
-      - redis
-      - rabbitmq
-    profiles:
-      - apps
+      SPRING_PROFILES_ACTIVE: prod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8001/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - ride-hailing-network
 
   api-gateway:
-    build:
-      context: .
-      args:
-        MODULE: api-gateway
     image: ghcr.io/cunos982003/ride-hailing-api-gateway:${IMAGE_TAG:-latest}
-    ports:
-      - "8000:8000"
     environment:
       SERVER_PORT: 8000
       REDIS_HOST: redis
-      REDIS_PASSWORD: redis_password_123
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
@@ -248,15 +322,30 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-    depends_on:
-      - redis
-      - rabbitmq
-    profiles:
-      - apps
+      SPRING_PROFILES_ACTIVE: prod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - ride-hailing-network
 
 volumes:
   postgres-data:
+  redis-data:
+  rabbitmq-data:
+
 
 networks:
-  default:
-    name: ride-hailing-network
+  ride-hailing-network:
+    driver: bridge
+    name: ride-hailing-prod-network
