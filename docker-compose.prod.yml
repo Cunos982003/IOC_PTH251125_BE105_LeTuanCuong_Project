@@ -24,7 +24,11 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD}
+      LOCATION_DB_PASSWORD: ${LOCATION_DB_PASSWORD}
+      DISPATCH_DB_PASSWORD: ${DISPATCH_DB_PASSWORD}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./infra/postgres/01-create-databases.sh:/docker-entrypoint-initdb.d/01-create-databases.sh:ro
@@ -94,7 +98,7 @@ services:
       SERVER_PORT: 8081
       DB_URL: jdbc:postgresql://postgres:5432/user
       DB_USERNAME: user_app
-      DB_PASSWORD: user_password
+      DB_PASSWORD: ${USER_DB_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -131,7 +135,7 @@ services:
       SERVER_PORT: 8082
       DB_URL: jdbc:postgresql://postgres:5432/location
       DB_USERNAME: location_app
-      DB_PASSWORD: location_password
+      DB_PASSWORD: ${LOCATION_DB_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -168,7 +172,7 @@ services:
       SERVER_PORT: 8083
       DB_URL: jdbc:postgresql://postgres:5432/dispatch
       DB_USERNAME: dispatch_app
-      DB_PASSWORD: dispatch_password
+      DB_PASSWORD: ${DISPATCH_DB_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -239,7 +243,7 @@ services:
       SERVER_PORT: 8085
       DB_URL: jdbc:postgresql://postgres:5432/payment
       DB_USERNAME: payment_app
-      DB_PASSWORD: payment_password
+      DB_PASSWORD: ${PAYMENT_DB_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
