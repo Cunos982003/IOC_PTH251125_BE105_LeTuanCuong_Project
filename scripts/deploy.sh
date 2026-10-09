@@ -16,7 +16,7 @@ set +a
 
 set -euo pipefail
 
-HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-300}"
 LOG_LINES="${LOG_LINES:-50}"
 
 # Repo root (parent of scripts/)
