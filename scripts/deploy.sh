@@ -1,4 +1,7 @@
 #!/bin/bash
+set -a
+source .env
+set +a
 # =============================================================================
 # Deploy script for Ride-Hailing (run on VPS/Linux)
 #   - Pulls images from GHCR using IMAGE_TAG
