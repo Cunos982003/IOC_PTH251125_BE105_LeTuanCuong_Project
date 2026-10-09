@@ -46,6 +46,16 @@
       }
     },
     {
+      "name": "user.registered",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "events.dlx",
+        "x-dead-letter-routing-key": "user.registered.dlq"
+      }
+    },
+    {
       "name": "payment.users.registered",
       "vhost": "/",
       "durable": true,
@@ -126,6 +136,14 @@
     {
       "source": "events",
       "vhost": "/",
+      "destination": "user.registered",
+      "destination_type": "queue",
+      "routing_key": "users.registered",
+      "arguments": {}
+    },
+    {
+      "source": "events",
+      "vhost": "/",
       "destination": "payment.users.registered",
       "destination_type": "queue",
       "routing_key": "users.registered",
@@ -161,6 +179,14 @@
       "destination": "user.trips",
       "destination_type": "queue",
       "routing_key": "user.trips.dlq",
+      "arguments": {}
+    },
+        {
+      "source": "events.dlx",
+      "vhost": "/",
+      "destination": "user.registered",
+      "destination_type": "queue",
+      "routing_key": "user.registered.dlq",
       "arguments": {}
     },
     {

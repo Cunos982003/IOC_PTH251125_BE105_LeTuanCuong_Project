@@ -6,7 +6,8 @@ import java.util.UUID;
 public class InsufficientBalanceScenario {
     private final ApiGatewayClient api;
     private final String wsUrl;
-    public InsufficientBalanceScenario(ApiGatewayClient api, String wsUrl) { this.api = api; this.wsUrl = wsUrl; }
+    private final RedisTestClient redis;
+    public InsufficientBalanceScenario(ApiGatewayClient api, String wsUrl, RedisTestClient redis) { this.api = api; this.wsUrl = wsUrl; this.redis = redis; }
     public ScenarioResult run() {
         long start = System.currentTimeMillis();
         try (WsGatewayClient ws = new WsGatewayClient(wsUrl)) {
@@ -14,12 +15,14 @@ public class InsufficientBalanceScenario {
             api.awaitBalance(customer, 500_000, 15_000);
             api.awaitBalance(driver, 0, 15_000);
             ws.connect(driver);
+            long driverId = api.userId(driver);
             long balance = 500_000, earnings = 0;
             // A longer route drains the initial wallet in a bounded number of legitimate trips.
             TripRequest request = new TripRequest(10.7769, 106.7009, 10.90, 106.80);
             for (int completed = 0; completed <= 20; completed++) {
                 ws.sendLocation(request.pickupLat(), request.pickupLng());
-                Thread.sleep(800);
+                Thread.sleep(3000);
+                redis.awaitDriverInGeo(driverId, 10_000);
                 ws.checkHealthy();
                 ApiGatewayClient.HttpResponseInfo response = api.requestTripRaw(customer, request, UUID.randomUUID().toString());
                 if (response.status() == 402 && "INSUFFICIENT_BALANCE".equals(api.errorCode(response.body()))) {

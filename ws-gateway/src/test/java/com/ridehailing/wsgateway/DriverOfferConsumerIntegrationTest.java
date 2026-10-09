@@ -195,7 +195,7 @@ class DriverOfferConsumerIntegrationTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> wsMessage = objectMapper.readValue(received, Map.class);
 
-        assertThat(wsMessage.get("t")).isEqualTo("offer");
+        assertThat(wsMessage.get("t")).isEqualTo("TRIP_REQUEST");
         assertThat(wsMessage.get("tripId")).isEqualTo(tripId.toString());
         assertThat(wsMessage.get("fare")).isEqualTo((int) fare);
         assertThat(wsMessage.get("pickup")).isInstanceOf(Map.class);
@@ -300,7 +300,7 @@ class DriverOfferConsumerIntegrationTest {
         Map<String, Object> wsMessage = objectMapper.readValue(received, Map.class);
 
         assertThat(wsMessage).containsKeys("t", "tripId", "pickup", "fare", "expiresAt");
-        assertThat(wsMessage.get("t")).isEqualTo("offer");
+        assertThat(wsMessage.get("t")).isEqualTo("TRIP_REQUEST");
         assertThat(wsMessage.get("tripId")).isEqualTo(tripId.toString());
         assertThat(wsMessage.get("fare")).isEqualTo(200000);
 
@@ -366,7 +366,7 @@ class DriverOfferConsumerIntegrationTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> wsMessage = objectMapper.readValue(received, Map.class);
 
-        assertThat(wsMessage.get("t")).isEqualTo("offer");
+        assertThat(wsMessage.get("t")).isEqualTo("TRIP_REQUEST");
         assertThat(wsMessage.get("tripId")).isEqualTo(tripId.toString());
         assertThat(wsMessage.get("fare")).isEqualTo((int) fare);
         assertThat(wsMessage.get("pickup")).isInstanceOf(Map.class);

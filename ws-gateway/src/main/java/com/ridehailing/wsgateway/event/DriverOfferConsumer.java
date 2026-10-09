@@ -51,9 +51,9 @@ public class DriverOfferConsumer {
                 return; // ack automatically
             }
 
-            // Build WebSocket message: {t:"offer", tripId, pickup, fare, expiresAt}
+            // Build WebSocket message: {t:"TRIP_REQUEST", tripId, pickup, fare, expiresAt}
             Map<String, Object> wsMessage = new LinkedHashMap<>();
-            wsMessage.put("t", "offer");
+            wsMessage.put("t", "TRIP_REQUEST");
             wsMessage.put("tripId", event.tripId().toString());
             wsMessage.put("pickup", Map.of("lat", event.pickup().lat(), "lng", event.pickup().lng()));
             wsMessage.put("fare", event.fare());

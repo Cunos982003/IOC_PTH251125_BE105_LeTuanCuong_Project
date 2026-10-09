@@ -71,7 +71,7 @@ public class LocationBatcher {
 
         log.info("Processing location batch of {} updates", batch.size());
 
-        // 1. Send to location-service
+        // 1. Send to location-service (fire-and-forget with logging)
         List<LocationServiceClient.LocationDto> locations = batch.stream()
                 .map(u -> new LocationServiceClient.LocationDto(u.driverId, u.lat, u.lng, u.sentAt))
                 .toList();
