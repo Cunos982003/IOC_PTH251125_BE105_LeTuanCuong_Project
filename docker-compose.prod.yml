@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # Reverse Proxy & SSL Termination
   nginx:
@@ -38,12 +36,6 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
     networks:
       - ride-hailing-network
 
@@ -58,12 +50,6 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
     networks:
       - ride-hailing-network
 
@@ -82,12 +68,6 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
     networks:
       - ride-hailing-network
 
@@ -99,6 +79,9 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/user
       DB_USERNAME: user_app
       DB_PASSWORD: ${USER_DB_PASSWORD}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -120,12 +103,6 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
     networks:
       - ride-hailing-network
 
@@ -136,6 +113,9 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/location
       DB_USERNAME: location_app
       DB_PASSWORD: ${LOCATION_DB_PASSWORD}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -157,12 +137,6 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
     networks:
       - ride-hailing-network
 
@@ -173,6 +147,9 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/dispatch
       DB_USERNAME: dispatch_app
       DB_PASSWORD: ${DISPATCH_DB_PASSWORD}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -194,12 +171,6 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
     networks:
       - ride-hailing-network
 
@@ -207,6 +178,9 @@ services:
     image: ghcr.io/cunos982003/ride-hailing-pricing-service:${IMAGE_TAG:-latest}
     environment:
       SERVER_PORT: 8084
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -228,12 +202,6 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
     networks:
       - ride-hailing-network
 
@@ -244,6 +212,9 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/payment
       DB_USERNAME: payment_app
       DB_PASSWORD: ${PAYMENT_DB_PASSWORD}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -265,12 +236,6 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-        reservations:
-          memory: 512M
     networks:
       - ride-hailing-network
 
@@ -278,6 +243,9 @@ services:
     image: ghcr.io/cunos982003/ride-hailing-ws-gateway:${IMAGE_TAG:-latest}
     environment:
       SERVER_PORT: 8001
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -299,12 +267,6 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
     networks:
       - ride-hailing-network
 
@@ -312,6 +274,9 @@ services:
     image: ghcr.io/cunos982003/ride-hailing-api-gateway:${IMAGE_TAG:-latest}
     environment:
       SERVER_PORT: 8000
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       RABBITMQ_HOST: rabbitmq
@@ -334,12 +299,6 @@ services:
       retries: 3
       start_period: 40s
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
     networks:
       - ride-hailing-network
 
@@ -347,7 +306,6 @@ volumes:
   postgres-data:
   redis-data:
   rabbitmq-data:
-
 
 networks:
   ride-hailing-network:
