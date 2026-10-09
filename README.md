@@ -33,7 +33,7 @@ docker compose ps                          # Tất cả phải "healthy"
 
 - **[Đề bài gốc](docs/DE-BAI.md)** - Yêu cầu đề tài R1-R16
 - **[Build / Test / CI-CD / Deploy](BUILD-TEST-DEPLOY-GUIDE.md)** - Hướng dẫn chi tiết quy trình phát triển
-- **[CI/CD Setup](CI-SETUP-COMPLETE.md)** - GitHub Actions pipeline
+- **[CI/CD Deployment](DEPLOY-GUIDE.md)** - GitHub Actions → GHCR → VPS SSH deploy
 - **[E2E Testing](tools/e2e/README.md)** - Bộ test end-to-end
 - **[Load Testing](tools/loadtest/README.md)** - Công cụ kiểm thử tải
 - **[Contracts](docs/contracts/README.md)** - Hợp đồng giữa các service
@@ -165,9 +165,34 @@ python drivers.py --drivers 100 --duration 300    # Giả lập gửi GPS
 python latency.py --duration 300                  # Đo độ trễ (terminal khác)
 ```
 
-### 1.8. Deploy lên VPS
+### 1.8. Deploy lên VPS (CI/CD GitHub Actions → VPS)
 
-Xem chi tiết ở [mục 5](#5-hướng-dẫn-triển-khai-lên-server-vps-thực-tế).
+**Pipeline tự động** (`.github/workflows/ci.yml`) chạy khi push nhánh `master`:
+
+| Job | Chức năng |
+|-----|-----------|
+| `test` | `mvn -B verify` (unit + integration) |
+| `contracts` | Kiểm tra hợp đồng `docs/contracts` vs bản copy |
+| `images` | Build 7 image Docker → push **GHCR** (`ghcr.io/<owner>/ride-hailing-<service>:<sha>` + `:latest`) |
+| `deploy` | SSH vào VPS → chạy `./scripts/deploy.sh <sha>` (rolling update, health check) |
+
+**Bí mật GitHub cần thiết** (Settings → Secrets → Actions):
+| Secret | Mô tả |
+|--------|-------|
+| `VPS_HOST` | IP/hostname VPS |
+| `VPS_USER` | User SSH (vd `ubuntu`) |
+| `VPS_SSH_KEY` | **Private key** (`cat ~/.ssh/id_ed25519`) |
+| `GHCR_PAT` | PAT classic `write:packages` |
+| `GHCR_USER` | GitHub username |
+
+**Deploy thủ công trên VPS:**
+```bash
+cd ~/ride-hailing
+IMAGE_TAG=<sha> ./scripts/deploy.sh
+# Rollback:
+./scripts/deploy.sh <tag-trong-.deployed-tag>
+```
+Xem chi tiết ở [DEPLOY-GUIDE.md](DEPLOY-GUIDE.md) và [mục 5](#5-hướng-dẫn-triển-khai-lên-server-vps-thực-tế).
 
 ---
 
@@ -374,8 +399,15 @@ docker compose ps
 ./scripts/deploy.sh
 ```
 
-### Step 10: Tự động hoá CI/CD (GitHub Actions)
-Pipeline CI (`.github/workflows/ci.yml`) chạy test, kiểm tra hợp đồng và build 7 image (`push: false`, chỉ verify build). Job deploy tự động qua SSH được mô tả ở [BUILD-TEST-DEPLOY-GUIDE.md](BUILD-TEST-DEPLOY-GUIDE.md) và F6.
+### Step 10: Tự động hoá CI/CD (GitHub Actions → GHCR → VPS)
+Pipeline CI (`.github/workflows/ci.yml`) chạy khi push nhánh `master`:
+1. **test** — `mvn -B verify`
+2. **contracts** — Kiểm tra hợp đồng
+3. **images** — Build 7 image → push GHCR (`ghcr.io/<owner>/ride-hailing-<service>:<sha>` + `:latest`)
+4. **deploy** — SSH VPS → `./scripts/deploy.sh <sha>` (rolling update, health check)
+
+**Yêu cầu**: Thêm 5 secret GitHub (xem [DEPLOY-GUIDE.md](DEPLOY-GUIDE.md)#1-prerequisites).
+Xem chi tiết job deploy ở [DEPLOY-GUIDE.md](DEPLOY-GUIDE.md).
 
 ---
 

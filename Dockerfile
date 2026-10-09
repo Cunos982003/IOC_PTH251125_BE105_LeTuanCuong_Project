@@ -1,9 +1,13 @@
 # Multi-stage Dockerfile for Ride-Hailing microservices
-# Build stage
-FROM maven:3.9-eclipse-temurin-21 AS builder
+# Build stage - use newer Maven image with updated CA certificates
+FROM maven:3.9.9-eclipse-temurin-21 AS builder
 
 ARG MODULE
 WORKDIR /build
+
+# Update CA certificates to fix SSL handshake issues with Maven Central
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy parent pom.xml first for dependency caching
 COPY pom.xml .
@@ -16,11 +20,14 @@ COPY payment-service/pom.xml payment-service/
 COPY ws-gateway/pom.xml ws-gateway/
 COPY api-gateway/pom.xml api-gateway/
 
+# Pre-download dependencies for better caching and offline resilience
+RUN mvn -q dependency:go-offline -B
+
 # Copy source code
 COPY ${MODULE}/src ${MODULE}/src
 
 # Build the specific module (no -am since no shared modules)
-RUN mvn -q -pl ${MODULE} package -DskipTests
+RUN mvn -q -pl ${MODULE} package -DskipTests -o
 
 # Runtime stage
 FROM eclipse-temurin:21-jre
