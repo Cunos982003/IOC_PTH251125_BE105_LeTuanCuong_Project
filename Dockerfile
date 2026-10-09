@@ -20,8 +20,8 @@ COPY payment-service/pom.xml payment-service/
 COPY ws-gateway/pom.xml ws-gateway/
 COPY api-gateway/pom.xml api-gateway/
 
-# Pre-download dependencies for better caching and offline resilience
-RUN mvn -q dependency:go-offline -B
+# Pre-download dependencies (including test scope) for better caching and offline resilience
+RUN mvn -q dependency:go-offline -DincludeScope=test -B
 
 # Copy source code
 COPY ${MODULE}/src ${MODULE}/src
