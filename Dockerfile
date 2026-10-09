@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Ride-Hailing microservices
-# Build stage - use newer Maven image with updated CA certificates
-FROM maven:3.9.9-eclipse-temurin-21 AS builder
+# Build stage
+FROM maven:3.9-eclipse-temurin-21 AS builder
 
 ARG MODULE
 WORKDIR /build
