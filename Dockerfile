@@ -20,14 +20,11 @@ COPY payment-service/pom.xml payment-service/
 COPY ws-gateway/pom.xml ws-gateway/
 COPY api-gateway/pom.xml api-gateway/
 
-# Pre-download dependencies (including test scope) for better caching and offline resilience
-RUN mvn -q dependency:go-offline -DincludeScope=test -B
-
 # Copy source code
 COPY ${MODULE}/src ${MODULE}/src
 
-# Build the specific module (no -am since no shared modules)
-RUN mvn -q -pl ${MODULE} package -DskipTests -o
+# Build the specific module (CA certs updated above fixes SSL to Maven Central)
+RUN mvn -q -pl ${MODULE} package -DskipTests
 
 # Runtime stage
 FROM eclipse-temurin:21-jre
