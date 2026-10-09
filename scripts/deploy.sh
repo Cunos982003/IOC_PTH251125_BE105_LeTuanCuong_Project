@@ -1,4 +1,7 @@
 #!/bin/bash
+set -a
+source .env
+set +a
 # =============================================================================
 # Deploy script for Ride-Hailing (run on VPS/Linux)
 #   - Pulls images from GHCR using IMAGE_TAG
@@ -59,9 +62,12 @@ else
   echo "⚠ GHCR_TOKEN not set, assuming already logged in"
 fi
 
-# --- 3. Pull images ----------------------------------------------------------
+# --- 3. Pull images (fallback to local build if missing) ---------------------
 echo "→ Pulling images for tag $REQUESTED_TAG..."
-docker compose --profile apps --profile ha pull
+if ! docker compose --profile apps --profile ha pull; then
+  echo "⚠ Pull failed or images missing, building locally..."
+  docker compose --profile apps --profile ha build
+fi
 
 # --- 4. Rolling update -------------------------------------------------------
 # Order: infrastructure-independent services first, then dependent ones
