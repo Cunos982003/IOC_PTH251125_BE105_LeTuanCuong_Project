@@ -67,6 +67,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 600s
     restart: unless-stopped
     networks:
       - ride-hailing-network
@@ -95,13 +96,13 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ride-hailing-network
@@ -129,13 +130,13 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ride-hailing-network
@@ -163,13 +164,13 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ride-hailing-network
@@ -194,13 +195,13 @@ services:
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8084/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ride-hailing-network
@@ -228,13 +229,13 @@ services:
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
       PRICING_SERVICE_URL: http://pricing-service:8084
       WS_GATEWAY_URL: http://ws-gateway:8001
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8085/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ride-hailing-network
@@ -259,13 +260,13 @@ services:
       DISPATCH_SERVICE_URL: http://dispatch-service:8083
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8001/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ride-hailing-network
@@ -291,13 +292,13 @@ services:
       PRICING_SERVICE_URL: http://pricing-service:8084
       PAYMENT_SERVICE_URL: http://payment-service:8085
       WS_GATEWAY_URL: http://ws-gateway:8001
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 180s
     restart: unless-stopped
     networks:
       - ride-hailing-network
