@@ -42,6 +42,8 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     healthcheck:
@@ -263,6 +265,39 @@ services:
       SPRING_PROFILES_ACTIVE: prod,infra
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8001/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    restart: unless-stopped
+    networks:
+      - ride-hailing-network
+
+  ws-gateway-2:
+    image: ghcr.io/cunos982003/ride-hailing-ws-gateway:${IMAGE_TAG:-latest}
+    ports:
+      - "8011:8011"
+    environment:
+      SERVER_PORT: 8011
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_KEY: ${INTERNAL_KEY}
+      USER_SERVICE_URL: http://user-service:8081
+      LOCATION_SERVICE_URL: http://location-service:8082
+      DISPATCH_SERVICE_URL: http://dispatch-service:8083
+      PRICING_SERVICE_URL: http://pricing-service:8084
+      PAYMENT_SERVICE_URL: http://payment-service:8085
+      SPRING_PROFILES_ACTIVE: prod,infra
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8011/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3

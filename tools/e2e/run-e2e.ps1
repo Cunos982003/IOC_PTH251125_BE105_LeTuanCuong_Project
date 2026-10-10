@@ -3,9 +3,9 @@ $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Push-Location $projectRoot
 try {
-    $redisContainer = docker compose ps -q redis
+    $redisContainer = docker compose -f docker-compose.yml ps -q redis
     if ($LASTEXITCODE -ne 0 -or -not $redisContainer) {
-        throw "Redis Compose container not found. Start the stack with docker compose --profile apps up -d."
+        throw "Redis Compose container not found. Start the stack with docker compose -f docker-compose.yml --profile apps up -d."
     }
     if (-not $env:API_GATEWAY_URL) { $env:API_GATEWAY_URL = "http://localhost:8000" }
     if (-not $env:WS_GATEWAY_URL) { $env:WS_GATEWAY_URL = "ws://localhost:8001/ws/driver" }
