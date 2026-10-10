@@ -10,12 +10,24 @@
   ],
   "users": [
     {
+      "name": "guest",
+      "password": "guest",
+      "tags": ["administrator"]
+    },
+    {
       "name": "ride",
       "password": "ride-local-only",
       "tags": ["administrator"]
     }
   ],
   "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
     {
       "user": "ride",
       "vhost": "/",
@@ -216,6 +228,7 @@
       "source": "events.dlx",
       "vhost": "/",
       "destination": "ws.offers",
+      "destination_type": "queue",
       "destination_type": "queue",
       "routing_key": "ws.offers.dlq",
       "arguments": {}
